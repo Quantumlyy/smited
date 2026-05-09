@@ -130,60 +130,79 @@ internal sealed class SmitedGrpcService : SmitedService.SmitedServiceBase
         return Task.FromResult(response);
     }
 
-    public override Task<RegisterSensationResponse> RegisterSensation(
+    public override async Task<RegisterSensationResponse> RegisterSensation(
         RegisterSensationRequest request, ServerCallContext context)
     {
         var sensation = request.Sensation;
         var backend = _registry.TryGet(sensation.BackendId);
         if (backend is null)
         {
-            return Task.FromResult(new RegisterSensationResponse
+            return new RegisterSensationResponse
             {
                 Registered = false,
                 Error = $"backend '{sensation.BackendId}' is not registered",
-            });
+            };
         }
 
         if (!backend.Capabilities.Contains("sensation_registry_mutable", StringComparer.OrdinalIgnoreCase))
         {
-            return Task.FromResult(new RegisterSensationResponse
+            return new RegisterSensationResponse
             {
                 Registered = false,
                 Error = $"backend '{backend.Id}' does not permit runtime sensation registration "
                     + "(missing 'sensation_registry_mutable' capability)",
-            });
+            };
         }
 
         var domain = ProtoMappers.FromProtoRegistered(sensation);
-        var ok = _library.Register(domain, request.Overwrite);
+        bool ok;
+        try
+        {
+            ok = await _library.RegisterAsync(domain, backend.Kind, request.Overwrite, context.CancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to persist sensation {Name} for backend {BackendId}",
+                domain.Name, domain.BackendId);
+            return new RegisterSensationResponse
+            {
+                Registered = false,
+                Error = $"failed to persist sensation: {ex.Message}",
+            };
+        }
+
         if (!ok)
         {
-            return Task.FromResult(new RegisterSensationResponse
+            return new RegisterSensationResponse
             {
                 Registered = false,
                 Error = $"sensation '{domain.Name}' already exists for backend '{domain.BackendId}' "
                     + "(set overwrite=true to replace)",
-            });
+            };
         }
-        return Task.FromResult(new RegisterSensationResponse { Registered = true });
+        return new RegisterSensationResponse { Registered = true };
     }
 
-    public override Task<UnregisterSensationResponse> UnregisterSensation(
+    public override async Task<UnregisterSensationResponse> UnregisterSensation(
         UnregisterSensationRequest request, ServerCallContext context)
     {
         var backend = _registry.TryGet(request.BackendId);
         if (backend is null)
         {
-            return Task.FromResult(new UnregisterSensationResponse { Unregistered = false });
+            return new UnregisterSensationResponse { Unregistered = false };
         }
 
         if (!backend.Capabilities.Contains("sensation_registry_mutable", StringComparer.OrdinalIgnoreCase))
         {
-            return Task.FromResult(new UnregisterSensationResponse { Unregistered = false });
+            return new UnregisterSensationResponse { Unregistered = false };
         }
 
-        var removed = _library.Unregister(request.BackendId, request.Name);
-        return Task.FromResult(new UnregisterSensationResponse { Unregistered = removed });
+        var removed = await _library.UnregisterAsync(
+                request.BackendId, backend.Kind, request.Name, context.CancellationToken)
+            .ConfigureAwait(false);
+        return new UnregisterSensationResponse { Unregistered = removed };
     }
 
     public override async Task SubscribeEvents(

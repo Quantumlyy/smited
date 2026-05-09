@@ -1,18 +1,40 @@
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.Configuration;
 using Smited.Daemon.Sensations;
 using Smited.Daemon.Tests.Fixtures;
 using Xunit;
 
 namespace Smited.Daemon.Tests.Sensations;
 
-public class SensationLibraryTests
+public class SensationLibraryTests : IDisposable
 {
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "smited-lib-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_root))
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+    }
+
     private static SensationLibrary CreateLibrary(out RecordingEventSink sink)
     {
         sink = new RecordingEventSink();
-        return new SensationLibrary(sink, new FakeTimeProvider());
+        return new SensationLibrary(sink, new FakeTimeProvider(), Options.Create(new SmitedOptions()));
+    }
+
+    private SensationLibrary CreatePersistedLibrary(out RecordingEventSink sink)
+    {
+        sink = new RecordingEventSink();
+        var options = Options.Create(new SmitedOptions
+        {
+            Sensations = new SmitedOptions.SensationsOptions { LibraryRoot = _root },
+        });
+        return new SensationLibrary(sink, new FakeTimeProvider(), options);
     }
 
     private static RegisteredSensation MakeSensation(
@@ -120,5 +142,75 @@ public class SensationLibraryTests
         evt.BackendId.Should().Be("mock-owo");
         evt.SensationName.Should().Be("ping");
         evt.Change.Should().Be(SensationRegistryChange.Registered);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_writes_a_file_at_the_expected_path()
+    {
+        var lib = CreatePersistedLibrary(out _);
+        var sensation = MakeSensation("ping_disk");
+
+        var ok = await lib.RegisterAsync(sensation, "owo_skin", overwrite: false, CancellationToken.None);
+
+        ok.Should().BeTrue();
+        var path = Path.Combine(_root, "owo_skin", "ping_disk.json");
+        File.Exists(path).Should().BeTrue();
+
+        // Re-parse with the existing reader to confirm symmetry.
+        var roundTrip = SensationFileSerializer.Deserialize(File.ReadAllText(path));
+        roundTrip.Name.Should().Be("ping_disk");
+        roundTrip.BackendKind.Should().Be("owo_skin");
+    }
+
+    [Fact]
+    public async Task RegisterAsync_returns_false_without_overwrite_when_entry_exists()
+    {
+        var lib = CreatePersistedLibrary(out _);
+        var sensation = MakeSensation("ping");
+        await lib.RegisterAsync(sensation, "owo_skin", overwrite: false, CancellationToken.None);
+
+        var second = await lib.RegisterAsync(sensation, "owo_skin", overwrite: false, CancellationToken.None);
+
+        second.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RegisterAsync_overwrites_when_overwrite_is_true()
+    {
+        var lib = CreatePersistedLibrary(out _);
+        await lib.RegisterAsync(MakeSensation("ping"), "owo_skin", overwrite: false, CancellationToken.None);
+
+        var replacement = MakeSensation("ping") with { DisplayName = "Replaced" };
+        var ok = await lib.RegisterAsync(replacement, "owo_skin", overwrite: true, CancellationToken.None);
+
+        ok.Should().BeTrue();
+        lib.Get("mock-owo", "ping")!.DisplayName.Should().Be("Replaced");
+    }
+
+    [Fact]
+    public async Task UnregisterAsync_deletes_the_on_disk_file()
+    {
+        var lib = CreatePersistedLibrary(out _);
+        await lib.RegisterAsync(MakeSensation("ephemeral"), "owo_skin", overwrite: false, CancellationToken.None);
+        var path = Path.Combine(_root, "owo_skin", "ephemeral.json");
+        File.Exists(path).Should().BeTrue();
+
+        var removed = await lib.UnregisterAsync("mock-owo", "owo_skin", "ephemeral", CancellationToken.None);
+
+        removed.Should().BeTrue();
+        File.Exists(path).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UnregisterAsync_tolerates_an_already_missing_file()
+    {
+        var lib = CreatePersistedLibrary(out _);
+        await lib.RegisterAsync(MakeSensation("ghost"), "owo_skin", overwrite: false, CancellationToken.None);
+        var path = Path.Combine(_root, "owo_skin", "ghost.json");
+        File.Delete(path);
+
+        var removed = await lib.UnregisterAsync("mock-owo", "owo_skin", "ghost", CancellationToken.None);
+
+        removed.Should().BeTrue();
     }
 }

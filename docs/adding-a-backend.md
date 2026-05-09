@@ -81,7 +81,7 @@ Add the `EnableHapticVest` flag to `SmitedOptions.BackendsOptions` and to `appse
 
 Drop a `sensations/<your_kind>/*.json` directory at the repo root (or wherever `Smited:Sensations:LibraryRoot` points). At boot, `SensationLoader` picks up files whose `backend_kind` matches the backend's `Kind` field and binds each to your backend instance. Schema validation (parameter types, ranges, required fields, zone IDs) runs against your `ParameterSchema` and `ZoneTopology` before the daemon finishes starting; a failing file aborts startup with the path and offending field.
 
-If the backend should accept runtime registrations via the `RegisterSensation` RPC, advertise the `sensation_registry_mutable` capability tag.
+If the backend should accept runtime registrations via the `RegisterSensation` RPC, advertise the `sensation_registry_mutable` capability tag. Runtime registrations are written to `LibraryRoot/<your_kind>/<name>.json` in the same on-disk format as authored files — they survive across daemon restarts and are re-loaded by `SensationLoader` on next boot. This means authoring tools (text editors, in-house dashboards) can read or modify either kind of entry without caring how it was created.
 
 ## Platform-conditional backends (Windows-only example)
 

@@ -78,21 +78,8 @@ internal sealed class SensationLoader : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    /// <summary>
-    /// Resolves the configured library root: absolute paths pass through,
-    /// relative paths are anchored to <see cref="AppContext.BaseDirectory"/>
-    /// so the daemon's default <c>./sensations</c> resolves to the
-    /// directory next to the binary regardless of the invoker's working
-    /// directory.
-    /// </summary>
-    private static string ResolveLibraryRoot(string configured)
-    {
-        if (string.IsNullOrEmpty(configured) || Path.IsPathRooted(configured))
-        {
-            return configured;
-        }
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, configured));
-    }
+    private static string ResolveLibraryRoot(string configured) =>
+        LibraryRootResolver.Resolve(configured);
 
     private void LoadFile(string path, string expectedKind, IReadOnlyList<IHapticBackend> backends)
     {

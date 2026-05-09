@@ -225,4 +225,45 @@ public static class SensationFileSerializer
             RegisteredAt: now,
             Definition: definition);
     }
+
+    /// <summary>
+    /// Serialises a <see cref="RegisteredSensation"/> back to its on-disk
+    /// <see cref="SensationFileDto"/> shape, suitable for writing into the
+    /// sensation library directory tree. A round-trip through this method
+    /// and <see cref="ToInternal(SensationFileDto, string, DateTimeOffset)"/>
+    /// yields the same record, modulo <c>RegisteredAt</c> precision (the
+    /// timestamp is not stored in the on-disk format).
+    /// </summary>
+    /// <param name="sensation">The library entry to serialise.</param>
+    /// <param name="backendKind">
+    /// The hardware family this file binds to. Required because the
+    /// internal record carries only <c>BackendId</c> (a runtime id);
+    /// <c>backend_kind</c> is the file-level binding the loader uses.
+    /// </param>
+    public static SensationFileDto ToDto(RegisteredSensation sensation, string backendKind)
+    {
+        ArgumentNullException.ThrowIfNull(sensation);
+        ArgumentException.ThrowIfNullOrEmpty(backendKind);
+
+        return new SensationFileDto
+        {
+            Name = sensation.Name,
+            BackendKind = backendKind,
+            DisplayName = sensation.DisplayName,
+            Description = sensation.Description,
+            Tags = sensation.Tags.ToList(),
+            DefaultZoneIds = sensation.DefaultZoneIds.ToList(),
+            DefaultIntensity = sensation.DefaultIntensity,
+            EstimatedDuration = sensation.EstimatedDuration,
+            Definition = new InlineSensationDto
+            {
+                Microsensations = sensation.Definition
+                    .Select(m => new MicrosensationDto
+                    {
+                        Parameters = new Dictionary<string, ParameterValue>(m.Values, StringComparer.OrdinalIgnoreCase),
+                    })
+                    .ToList(),
+            },
+        };
+    }
 }

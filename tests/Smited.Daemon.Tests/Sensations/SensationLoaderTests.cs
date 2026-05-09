@@ -78,11 +78,11 @@ public class SensationLoaderTests : IDisposable
         {
             registry.Register(b);
         }
-        library = new SensationLibrary(sink, time);
         var options = Options.Create(new SmitedOptions
         {
             Sensations = new SmitedOptions.SensationsOptions { LibraryRoot = _root },
         });
+        library = new SensationLibrary(sink, time, options);
         return new SensationLoader(registry, library, time, options, NullLogger<SensationLoader>.Instance);
     }
 

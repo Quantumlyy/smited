@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.Configuration;
 using Smited.Daemon.Sensations;
 using Smited.Daemon.Tests.Fixtures;
 using Smited.Daemon.Triggering;
@@ -231,7 +233,7 @@ public class TriggerCoordinatorTests
         var sink = new RecordingEventSink();
         var time = new FakeTimeProvider();
         var registry = new BackendRegistry(sink, time);
-        var library = new SensationLibrary(sink, time);
+        var library = new SensationLibrary(sink, time, Options.Create(new SmitedOptions()));
         var concurrency = new ConcurrencyEnforcer();
 
         var schema = new ParameterSchema();
