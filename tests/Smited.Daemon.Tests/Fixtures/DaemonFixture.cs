@@ -29,6 +29,8 @@ internal sealed class DaemonFixture : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly string _libraryRoot;
+    private readonly string _userConfigDir;
+    private readonly string? _previousUserConfigDir;
 
     public DaemonFixture(Action<string>? seed = null)
     {
@@ -36,6 +38,12 @@ internal sealed class DaemonFixture : IDisposable
         Directory.CreateDirectory(_libraryRoot);
         Directory.CreateDirectory(Path.Combine(_libraryRoot, "owo_skin"));
         seed?.Invoke(_libraryRoot);
+
+        // Redirect user config away from the real ~/.config/smited so the
+        // test run doesn't touch the developer's actual directory.
+        _userConfigDir = Path.Combine(_libraryRoot, "user-config");
+        _previousUserConfigDir = Environment.GetEnvironmentVariable("SMITED_CONFIG_DIR");
+        Environment.SetEnvironmentVariable("SMITED_CONFIG_DIR", _userConfigDir);
 
         Time = new FakeTimeProvider(new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero));
 
@@ -116,6 +124,7 @@ internal sealed class DaemonFixture : IDisposable
         try { Channel.Dispose(); } catch { }
         try { PanicHttpClient.Dispose(); } catch { }
         try { _factory.Dispose(); } catch { }
+        Environment.SetEnvironmentVariable("SMITED_CONFIG_DIR", _previousUserConfigDir);
         try
         {
             if (Directory.Exists(_libraryRoot))

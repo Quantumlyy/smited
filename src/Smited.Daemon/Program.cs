@@ -16,6 +16,14 @@ using Smited.V1;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// User config layer: appsettings.json (+ Development overlay) is added by
+// CreateBuilder; layering the per-user config file AFTER means user values
+// win over daemon defaults. optional=true so missing file is fine;
+// reloadOnChange=false because startup state doesn't reconcile mid-flight.
+var userConfigPath = UserConfigPath.Resolve();
+UserConfigPath.EnsureExists(userConfigPath);
+builder.Configuration.AddJsonFile(userConfigPath, optional: true, reloadOnChange: false);
+
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration));
 
 builder.Services.Configure<SmitedOptions>(builder.Configuration.GetSection("Smited"));

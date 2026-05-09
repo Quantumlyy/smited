@@ -81,6 +81,15 @@ Every panic invocation logs a `Critical` line:
 
 Filter Serilog's pipeline on `LogLevel >= Critical` to route panics to a separate sink (alerts, webhooks, etc.) without touching the rest of the daemon's logging.
 
+## User configuration
+
+smited reads optional user-scoped configuration from a platform-specific path:
+
+- **macOS / Linux**: `$XDG_CONFIG_HOME/smited/config.json`, defaulting to `~/.config/smited/config.json`.
+- **Windows**: `%APPDATA%\smited\config.json`.
+
+The file is created on first run with all keys commented out. Edit it, uncomment what you want to override, and restart the daemon. Values here win over `appsettings.json` defaults. Config is not hot-reloaded — restart after editing.
+
 ## Configuration
 
 Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented inline. Key knobs:
