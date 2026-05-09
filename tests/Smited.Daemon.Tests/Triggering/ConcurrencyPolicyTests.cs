@@ -38,8 +38,8 @@ public class ConcurrencyPolicyTests
         var sys = BuildSystem(ConcurrencyPolicy.CancelOldest, maxConcurrent: 1, sensationDuration: TimeSpan.FromSeconds(5));
 
         var firstResult = await sys.Coordinator.TriggerAsync(MakeInput("a"), default);
-        var firstAccepted = firstResult.Should().BeOfType<TriggerOutcome.Accepted>().Subject;
-        var firstRequest = sys.Backend.LastRequest!;
+        firstResult.Should().BeOfType<TriggerOutcome.Accepted>();
+        sys.Backend.LastRequest.Should().NotBeNull();
 
         sys.Time.Advance(TimeSpan.FromMilliseconds(100));
 

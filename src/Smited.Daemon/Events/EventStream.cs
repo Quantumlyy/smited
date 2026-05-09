@@ -76,11 +76,18 @@ internal sealed class EventStream
         _ => EventKind.Unspecified,
     };
 
+    /// <summary>
+    /// Maps the <c>Smited:EventBus:SlowSubscriberPolicy</c> string to a
+    /// <see cref="BoundedChannelFullMode"/>. Only drop-on-overflow modes
+    /// are supported: <c>EventBus</c> uses <see cref="ChannelWriter{T}.TryWrite"/>
+    /// for fan-out, which cannot distinguish "buffer full" from "channel
+    /// closed" under <see cref="BoundedChannelFullMode.Wait"/>. Unknown or
+    /// unsupported values fall back to <c>DropOldest</c>.
+    /// </summary>
     internal static BoundedChannelFullMode ResolveFullMode(string policy) => policy switch
     {
         "drop_oldest" => BoundedChannelFullMode.DropOldest,
         "drop_newest" => BoundedChannelFullMode.DropNewest,
-        "wait" => BoundedChannelFullMode.Wait,
         _ => BoundedChannelFullMode.DropOldest,
     };
 }

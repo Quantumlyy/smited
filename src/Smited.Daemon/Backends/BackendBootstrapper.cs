@@ -92,9 +92,13 @@ internal sealed class BackendBootstrapper : IHostedService
         {
             await Task.WhenAll(_fanTasks).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
+        catch (OperationCanceledException)
         {
             // Don't block shutdown if a fan task is misbehaving.
+        }
+        catch (TimeoutException)
+        {
+            // Same — drop the fan task so it gets GC'd later.
         }
 
         foreach (var backend in _registered)

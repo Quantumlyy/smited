@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends.Internal;
 using Smited.Daemon.History;
@@ -10,8 +11,10 @@ namespace Smited.Daemon.Diagnostics;
 
 /// <summary>
 /// Maps the <c>/panic</c> emergency-stop endpoint. Cancels every active
-/// sensation across every backend. Accepts GET and POST with no body.
-/// Returns immediately with a count of stopped sensations.
+/// sensation across every backend. POST-only with no body — GET is
+/// rejected so cross-site triggers via <c>&lt;img src&gt;</c> tags can't
+/// drive the endpoint accidentally. Returns immediately with a count of
+/// stopped sensations.
 ///
 /// Listens on its own Kestrel port (HTTP/1.1) so a wedged gRPC pipeline
 /// can't take this endpoint down with it. Bypasses the protovalidate
@@ -19,6 +22,12 @@ namespace Smited.Daemon.Diagnostics;
 /// the host is up and <see cref="TriggerCoordinator"/> exists, the
 /// endpoint works — at worst it stops zero sensations because none are
 /// active.
+///
+/// The stop call uses the application-lifetime cancellation token, NOT
+/// <c>HttpContext.RequestAborted</c>. A panic must run to completion
+/// even if the panicking client (Streamdeck Companion, curl) drops the
+/// connection mid-flight; otherwise a real backend that honors
+/// cancellation could abort the emergency stop.
 /// </summary>
 internal static class PanicEndpoint
 {
@@ -29,6 +38,7 @@ internal static class PanicEndpoint
             TriggerCoordinator coordinator,
             IHistoryRecorder history,
             TimeProvider time,
+            IHostApplicationLifetime lifetime,
             ILogger<PanicMarker> log) =>
         {
             var peer = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -44,7 +54,7 @@ internal static class PanicEndpoint
             {
                 stopped = await coordinator.StopAsync(
                     new BackendStopRequest(SensationId: null, All: true),
-                    ctx.RequestAborted);
+                    lifetime.ApplicationStopping);
             }
             catch (Exception ex)
             {
@@ -99,7 +109,7 @@ internal static class PanicEndpoint
             });
         };
 
-        app.MapMethods("/panic", new[] { "GET", "POST" }, handler)
+        app.MapPost("/panic", handler)
             .WithName("PanicStop")
             .WithDisplayName("Emergency stop");
 

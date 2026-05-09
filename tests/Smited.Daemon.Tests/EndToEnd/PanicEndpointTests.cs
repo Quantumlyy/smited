@@ -30,11 +30,13 @@ public class PanicEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task GET_panic_responds_OK()
+    public async Task GET_panic_is_rejected_with_method_not_allowed()
     {
+        // /panic is POST-only — refusing GET prevents trivial CSRF triggers
+        // (e.g. an <img> tag pointing at the panic port on localhost).
         var response = await _fixture.PanicHttpClient.GetAsync("/panic");
 
-        response.EnsureSuccessStatusCode();
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.MethodNotAllowed);
     }
 
     [Fact]

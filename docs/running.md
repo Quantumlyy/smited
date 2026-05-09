@@ -52,8 +52,10 @@ tail -f logs/smited-*.log
 smited exposes the emergency-stop endpoint on a separate HTTP/1.1 listener so a wedged gRPC pipeline can't take it down with it:
 
 ```
-GET/POST http://<host>:7778/panic
+POST http://<host>:7778/panic
 ```
+
+`POST`-only — `GET` returns `405 Method Not Allowed` so a stray `<img src=…>` tag can't accidentally fire the panic button.
 
 By default the daemon binds to `127.0.0.1`, so the panic endpoint is reachable only from the same machine. To use Streamdeck Companion on a different machine, set `Smited.BindAddress` to `0.0.0.0` in `appsettings.json` and ensure the LAN segment is trusted. **The endpoint is not authenticated** — LAN-only is the access control. Don't expose `:7778` to the public internet.
 

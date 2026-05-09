@@ -103,6 +103,10 @@ internal sealed class TriggerCoordinator
                         {
                             // Already disposed elsewhere; nothing to do.
                         }
+                        // Preempt path takes ownership of release: the monitoring
+                        // task's ReleaseInternal short-circuits on TryMarkReleased,
+                        // so dispose the CTS here.
+                        preempted.Cts.Dispose();
                     }
                 }
                 break;
@@ -200,6 +204,9 @@ internal sealed class TriggerCoordinator
             catch (ObjectDisposedException) { }
 
             _concurrency.Release(active.BackendId, active);
+            // Stop short-circuits TryMarkReleased so the monitoring task's
+            // ReleaseInternal becomes a no-op; dispose the CTS here instead.
+            active.Cts.Dispose();
             stopped++;
         }
 
@@ -240,6 +247,9 @@ internal sealed class TriggerCoordinator
         }
         _active.TryRemove(active.SensationId, out _);
         _concurrency.Release(active.BackendId, active);
+        // Dispose the linked CTS we created when admitting this sensation
+        // so its registration on the caller's token is released.
+        active.Cts.Dispose();
     }
 
     private static TriggerOutcome.Rejected Reject(

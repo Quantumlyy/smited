@@ -262,4 +262,80 @@ public class SensationLoaderTests : IDisposable
 
         library.Count.Should().Be(0);
     }
+
+    [Fact]
+    public async Task Aborts_on_empty_microsensations_array()
+    {
+        WriteSensation("owo_skin", "empty.json", """
+            {
+              "name": "x", "backend_kind": "owo_skin", "display_name": "x",
+              "description": "", "tags": [], "default_zone_ids": [],
+              "estimated_duration": "0.2s",
+              "definition": { "microsensations": [] }
+            }
+            """);
+
+        var loader = BuildLoader(out _, BuildOwoBackend());
+
+        var act = () => loader.StartAsync(CancellationToken.None);
+
+        await act.Should().ThrowAsync<SmitedStartupException>()
+            .WithMessage("*empty definition.microsensations*");
+    }
+
+    [Fact]
+    public async Task Aborts_on_default_intensity_out_of_range()
+    {
+        WriteSensation("owo_skin", "loud.json", """
+            {
+              "name": "x", "backend_kind": "owo_skin", "display_name": "x",
+              "description": "", "tags": [], "default_zone_ids": [],
+              "default_intensity": 999,
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  { "parameters": {
+                      "frequency": { "number": 50 },
+                      "intensity": { "number": 50 },
+                      "duration": { "duration": "0.2s" }
+                  } }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out _, BuildOwoBackend());
+
+        var act = () => loader.StartAsync(CancellationToken.None);
+
+        await act.Should().ThrowAsync<SmitedStartupException>()
+            .WithMessage("*default_intensity=999*");
+    }
+
+    [Fact]
+    public async Task Required_parameter_check_is_case_insensitive()
+    {
+        WriteSensation("owo_skin", "case.json", """
+            {
+              "name": "x", "backend_kind": "owo_skin", "display_name": "x",
+              "description": "", "tags": [], "default_zone_ids": [],
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  { "parameters": {
+                      "Frequency": { "number": 50 },
+                      "INTENSITY": { "number": 50 },
+                      "duration":  { "duration": "0.2s" }
+                  } }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out var library, BuildOwoBackend());
+
+        await loader.StartAsync(CancellationToken.None);
+
+        library.Count.Should().Be(1);
+    }
 }

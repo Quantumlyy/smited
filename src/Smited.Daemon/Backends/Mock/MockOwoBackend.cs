@@ -128,6 +128,10 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
             finally
             {
                 _playbacks.TryRemove(request.SensationId, out _);
+                // Dispose the linked CTS we created above so its registration
+                // on the caller's token is released — otherwise long-lived
+                // callers accumulate registrations once per trigger.
+                linked.Dispose();
             }
             EmitEvent(finalEvent);
         });

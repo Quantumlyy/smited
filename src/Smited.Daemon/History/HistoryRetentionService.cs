@@ -67,15 +67,26 @@ internal sealed class HistoryRetentionService : BackgroundService
         var days = _options.History.RetentionDays;
         if (days <= 0) return;
 
+        // SQLite stores DateTimeOffset as ISO 8601 TEXT; raw parameterised
+        // DELETEs avoid EF Core's LINQ-translation gap on DateTimeOffset
+        // comparisons inside ExecuteDeleteAsync. ExecuteSqlAsync with a
+        // FormattableString parameterises {cutoff} safely; the table names
+        // are literal in the source so there's no injection surface.
         var cutoff = _time.GetUtcNow().AddDays(-days);
+
         try
         {
             await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
-            var triggers = await db.Triggers.Where(r => r.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-            var stops = await db.Stops.Where(r => r.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-            var panics = await db.Panics.Where(r => r.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-            var lifecycle = await db.Lifecycle.Where(r => r.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-            var backendStates = await db.BackendStates.Where(r => r.Timestamp < cutoff).ExecuteDeleteAsync(ct);
+            var triggers = await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM \"Triggers\" WHERE \"Timestamp\" < {cutoff}", ct);
+            var stops = await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM \"Stops\" WHERE \"Timestamp\" < {cutoff}", ct);
+            var panics = await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM \"Panics\" WHERE \"Timestamp\" < {cutoff}", ct);
+            var lifecycle = await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM \"Lifecycle\" WHERE \"Timestamp\" < {cutoff}", ct);
+            var backendStates = await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM \"BackendStates\" WHERE \"Timestamp\" < {cutoff}", ct);
 
             _log.LogInformation(
                 "History retention pass deleted {Triggers} triggers, {Stops} stops, {Panics} panics, {Lifecycle} lifecycle, {BackendStates} backend-state rows older than {Cutoff:o}",

@@ -100,11 +100,7 @@ internal sealed class SensationLoader : IHostedService
                 $"Sensation file '{path}' declares backend_kind='{file.BackendKind}' but is in the '{expectedKind}' directory.");
         }
 
-        if (string.IsNullOrEmpty(file.Name))
-        {
-            throw new SmitedStartupException(
-                $"Sensation file '{path}' has empty name.");
-        }
+        ValidateFileLevel(path, file);
 
         foreach (var backend in backends)
         {
@@ -118,6 +114,41 @@ internal sealed class SensationLoader : IHostedService
         }
     }
 
+    /// <summary>
+    /// Validates fields whose contract is independent of any specific
+    /// backend's schema: shape of the JSON, required fields present,
+    /// numeric fields within the schema-mandated ranges. Catching these
+    /// at boot mirrors the validation that <c>protovalidate</c> applies
+    /// to runtime <c>RegisterSensation</c> RPCs, so authored files can't
+    /// quietly carry shapes that the wire would reject.
+    /// </summary>
+    private static void ValidateFileLevel(string path, SensationFileDto file)
+    {
+        if (string.IsNullOrEmpty(file.Name))
+        {
+            throw new SmitedStartupException($"Sensation file '{path}' has empty name.");
+        }
+        if (string.IsNullOrEmpty(file.DisplayName))
+        {
+            throw new SmitedStartupException($"Sensation file '{path}' has empty display_name.");
+        }
+        if (file.Definition.Microsensations.Count == 0)
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has empty definition.microsensations (must contain at least one).");
+        }
+        if (file.DefaultIntensity is { } intensity && intensity > 100)
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has default_intensity={intensity}; valid range is 0..100.");
+        }
+        if (file.EstimatedDuration < TimeSpan.Zero || file.EstimatedDuration > TimeSpan.FromMinutes(5))
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has estimated_duration={file.EstimatedDuration}; valid range is 0s..300s.");
+        }
+    }
+
     private static void ValidateAgainstBackend(string path, SensationFileDto file, IHapticBackend backend)
     {
         var schema = backend.Parameters;
@@ -126,6 +157,11 @@ internal sealed class SensationLoader : IHostedService
         for (int i = 0; i < file.Definition.Microsensations.Count; i++)
         {
             var micro = file.Definition.Microsensations[i];
+            // Build a case-insensitive view of the parameter keys so the
+            // required-parameter check below matches the case-insensitive
+            // type/range check above.
+            var presentKeys = new HashSet<string>(micro.Parameters.Keys, StringComparer.OrdinalIgnoreCase);
+
             foreach (var (key, value) in micro.Parameters)
             {
                 if (!paramByName.TryGetValue(key, out var def))
@@ -147,7 +183,7 @@ internal sealed class SensationLoader : IHostedService
 
             foreach (var def in schema.Parameters)
             {
-                if (def.Required && !micro.Parameters.ContainsKey(def.Name))
+                if (def.Required && !presentKeys.Contains(def.Name))
                 {
                     throw new SmitedStartupException(
                         $"In '{path}': microsensations[{i}].parameters is missing required '{def.Name}' (backend '{backend.Id}').");
