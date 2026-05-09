@@ -73,6 +73,46 @@ public class MockOwoBackendTests
     }
 
     [Fact]
+    public async Task Multi_microsensation_request_sums_durations_for_estimated_total()
+    {
+        var backend = NewBackend(out _);
+        await using var ____ = backend;
+
+        // Two pulses of 0.3s each — the total wall-clock time should be
+        // the sum, not the max, otherwise the second pulse never gets
+        // its slot and the SensationCompleted fires too early.
+        var values = new Dictionary<ParameterValue, ParameterValue>(0); // placeholder type-only
+        var values1 = new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(50),
+            ["intensity"] = new ParameterValue.Number(50),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
+        };
+        var values2 = new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(50),
+            ["intensity"] = new ParameterValue.Number(50),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(400)),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "multi",
+            SensationName: "two_pulses",
+            ZoneIds: new[] { "pectoral_l" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[]
+            {
+                new MicrosensationParameters(values1),
+                new MicrosensationParameters(values2),
+            });
+
+        var result = await backend.TriggerAsync(request, CancellationToken.None);
+
+        result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(700));
+    }
+
+    [Fact]
     public async Task Trigger_emits_Started_then_Completed_after_estimated_duration()
     {
         var backend = NewBackend(out var time);

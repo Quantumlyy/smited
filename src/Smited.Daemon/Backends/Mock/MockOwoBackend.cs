@@ -205,16 +205,21 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
 
     private static TimeSpan ComputeEstimatedDuration(BackendTriggerRequest request)
     {
-        var max = TimeSpan.Zero;
+        // Microsensations play sequentially, not in parallel — sum the
+        // per-step durations (active stim + envelope) so the full
+        // sensation lasts the same wall-clock time as the file's
+        // declared estimated_duration. Taking the max would let
+        // multi-pulse sensations like test_failed complete after just
+        // the longest pulse and release the concurrency slot too early.
+        var total = TimeSpan.Zero;
         foreach (var micro in request.Microsensations)
         {
-            var total = ReadDuration(micro, "duration")
+            total += ReadDuration(micro, "duration")
                 + ReadDuration(micro, "ramp_up")
                 + ReadDuration(micro, "ramp_down")
                 + ReadDuration(micro, "exit_delay");
-            if (total > max) max = total;
         }
-        return max;
+        return total;
     }
 
     private static TimeSpan ReadDuration(MicrosensationParameters micro, string key) =>

@@ -312,6 +312,66 @@ public class SensationLoaderTests : IDisposable
             .WithMessage("*default_intensity=999*");
     }
 
+    [Theory]
+    [InlineData("../evil")]
+    [InlineData("MIXEDCASE")]
+    [InlineData("space here")]
+    [InlineData("_underscore_first")]
+    public async Task Aborts_on_name_violating_ident_pattern(string badName)
+    {
+        WriteSensation("owo_skin", "bad_name.json", $$"""
+            {
+              "name": "{{badName}}", "backend_kind": "owo_skin", "display_name": "x",
+              "description": "", "tags": [], "default_zone_ids": [],
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  { "parameters": {
+                      "frequency": { "number": 50 },
+                      "intensity": { "number": 50 },
+                      "duration": { "duration": "0.2s" }
+                  } }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out _, BuildOwoBackend());
+
+        var act = () => loader.StartAsync(CancellationToken.None);
+
+        await act.Should().ThrowAsync<SmitedStartupException>()
+            .WithMessage("*ident pattern*");
+    }
+
+    [Fact]
+    public async Task Aborts_on_tag_violating_ident_pattern()
+    {
+        WriteSensation("owo_skin", "bad_tag.json", """
+            {
+              "name": "ok", "backend_kind": "owo_skin", "display_name": "x",
+              "description": "", "tags": ["Build Error"], "default_zone_ids": [],
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  { "parameters": {
+                      "frequency": { "number": 50 },
+                      "intensity": { "number": 50 },
+                      "duration": { "duration": "0.2s" }
+                  } }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out _, BuildOwoBackend());
+
+        var act = () => loader.StartAsync(CancellationToken.None);
+
+        await act.Should().ThrowAsync<SmitedStartupException>()
+            .WithMessage("*tags[0]*");
+    }
+
     [Fact]
     public async Task Required_parameter_check_is_case_insensitive()
     {

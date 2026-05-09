@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -115,10 +116,14 @@ internal sealed class SensationLoader : IHostedService
     /// <summary>
     /// Validates fields whose contract is independent of any specific
     /// backend's schema: shape of the JSON, required fields present,
-    /// numeric fields within the schema-mandated ranges. Catching these
-    /// at boot mirrors the validation that <c>protovalidate</c> applies
-    /// to runtime <c>RegisterSensation</c> RPCs, so authored files can't
-    /// quietly carry shapes that the wire would reject.
+    /// numeric fields within range, and identifier-shaped strings
+    /// matching the same patterns <c>protovalidate</c> enforces on
+    /// runtime <c>RegisterSensation</c> RPCs. Catching these at boot
+    /// keeps authored files in lockstep with the wire — otherwise a
+    /// file with name <c>"../evil"</c> or uppercase characters would
+    /// load but become untriggerable through any gRPC client (the
+    /// <c>Trigger</c> handler's <c>sensation_name</c> field would fail
+    /// the validator before reaching the service).
     /// </summary>
     private static void ValidateFileLevel(string path, SensationFileDto file)
     {
@@ -126,9 +131,21 @@ internal sealed class SensationLoader : IHostedService
         {
             throw new SmitedStartupException($"Sensation file '{path}' has empty name.");
         }
+        EnsureIdent(path, "name", file.Name, maxLen: 64);
+
         if (string.IsNullOrEmpty(file.DisplayName))
         {
             throw new SmitedStartupException($"Sensation file '{path}' has empty display_name.");
+        }
+        if (file.DisplayName.Length > 128)
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has display_name longer than 128 chars.");
+        }
+        if (file.Description.Length > 1024)
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has description longer than 1024 chars.");
         }
         if (file.Definition.Microsensations.Count == 0)
         {
@@ -144,6 +161,39 @@ internal sealed class SensationLoader : IHostedService
         {
             throw new SmitedStartupException(
                 $"Sensation file '{path}' has estimated_duration={file.EstimatedDuration}; valid range is 0s..300s.");
+        }
+
+        for (int i = 0; i < file.Tags.Count; i++)
+        {
+            EnsureIdent(path, $"tags[{i}]", file.Tags[i], maxLen: 32);
+        }
+        for (int i = 0; i < file.DefaultZoneIds.Count; i++)
+        {
+            EnsureIdent(path, $"default_zone_ids[{i}]", file.DefaultZoneIds[i], maxLen: 64);
+        }
+    }
+
+    /// <summary>
+    /// Mirror of the proto's <c>^[a-z0-9][a-z0-9_-]*$</c> identifier
+    /// pattern, with the same length bound. The hand-rolled regex
+    /// avoids pulling in a heavier dependency for one shape.
+    /// </summary>
+    private static readonly Regex IdentPattern = new(
+        "^[a-z0-9][a-z0-9_-]*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static void EnsureIdent(string path, string field, string value, int maxLen)
+    {
+        if (value.Length > maxLen)
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}': {field}='{value}' exceeds {maxLen} chars.");
+        }
+        if (!IdentPattern.IsMatch(value))
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}': {field}='{value}' does not match the required "
+                + "ident pattern '^[a-z0-9][a-z0-9_-]*$'.");
         }
     }
 
