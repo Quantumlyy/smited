@@ -1,0 +1,23 @@
+{
+  "name": "chat_zap",
+  "backend_kind": "owo_skin",
+  "display_name": "Chat Zap",
+  "description": "Quick zap to the left arm — someone @-mentioned you.",
+  "tags": ["chat", "mention"],
+  "default_zone_ids": ["arm_l"],
+  "default_intensity": 55,
+  "estimated_duration": "0.2s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "frequency": { "number": 90 },
+          "intensity": { "number": 55 },
+          "duration": { "duration": "0.15s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.03s" }
+        }
+      }
+    ]
+  }
+}

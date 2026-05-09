@@ -42,8 +42,39 @@
     <InternalsVisibleTo Include="Smited.Daemon.Tests" />
   </ItemGroup>
 
+  <!--
+    Windows-conditional reverse ProjectReference so the
+    Smited.Daemon.Owo assembly is built and copied into the daemon's
+    output directory whenever we're on Windows. ReferenceOutputAssembly
+    is false because daemon source never imports OwoBackend — the
+    BackendBootstrapper loads it via Type.GetType reflection at runtime,
+    keeping the compile-time graph acyclic.
+  -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <ProjectReference Include="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <OutputItemType>Content</OutputItemType>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Copy the repo's sensation library next to the binary so the daemon's
+    default `./sensations` LibraryRoot resolves to it regardless of where
+    `dotnet run` is invoked from.
+  -->
+  <ItemGroup>
+    <Content Include="..\..\sensations\**\*.json"
+             Link="sensations\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\sensations\README.md"
+             Link="sensations\README.md"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
