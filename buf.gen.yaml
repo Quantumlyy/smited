@@ -1,0 +1,8 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/csharp
+    out: gen/csharp
+  - remote: buf.build/grpc/csharp
+    out: gen/csharp
+inputs:
+  - module: buf.build/quantumly-labs/smited:v0.1.0
