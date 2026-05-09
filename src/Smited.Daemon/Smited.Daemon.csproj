@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Smited.Daemon</RootNamespace>
+    <AssemblyName>Smited.Daemon</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Generated proto C# is committed under gen/csharp/ for hermetic builds.
+      We compile the files directly rather than using Grpc.Tools' .proto
+      pipeline.
+    -->
+    <Compile Include="..\..\gen\csharp\**\*.cs" LinkBase="Generated" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <!--
+      Grpc.AspNetCore pulls Grpc.Tools transitively, which would otherwise
+      auto-compile any .proto files in the project. We don't ship .proto;
+      excluding `build` assets disables that MSBuild pipeline so it can't
+      collide with the pre-generated code above.
+    -->
+    <PackageReference Include="Grpc.AspNetCore">
+      <ExcludeAssets>build</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
+    <PackageReference Include="ProtoValidate" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
