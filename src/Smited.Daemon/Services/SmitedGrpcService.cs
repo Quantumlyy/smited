@@ -143,11 +143,21 @@ internal sealed class SmitedGrpcService : SmitedService.SmitedServiceBase
 
     private TriggerRecord BuildTriggerRecord(ResolvedTriggerInput input, TriggerOutcome outcome)
     {
-        var (sensationId, accepted, errorCode, errorField) = outcome switch
+        // For accepted triggers prefer the coordinator's resolved zones
+        // and intensity (a named sensation may supply defaults the request
+        // omitted), so the history row reflects what actually played
+        // rather than the request as received.
+        var (sensationId, accepted, errorCode, errorField, zoneIds, intensity) = outcome switch
         {
-            TriggerOutcome.Accepted a => (a.SensationId, true, (string?)null, (string?)null),
-            TriggerOutcome.Rejected r => (string.Empty, false, r.Code.ToString(), r.Field),
-            _ => (string.Empty, false, "Unknown", (string?)null),
+            TriggerOutcome.Accepted a => (
+                a.SensationId, true, (string?)null, (string?)null,
+                (IReadOnlyList<string>)a.ResolvedZoneIds, a.ResolvedIntensityScale),
+            TriggerOutcome.Rejected r => (
+                string.Empty, false, r.Code.ToString(), r.Field,
+                (IReadOnlyList<string>)input.ZoneIds, input.IntensityScale),
+            _ => (
+                string.Empty, false, "Unknown", (string?)null,
+                (IReadOnlyList<string>)input.ZoneIds, input.IntensityScale),
         };
         return new TriggerRecord
         {
@@ -155,8 +165,8 @@ internal sealed class SmitedGrpcService : SmitedService.SmitedServiceBase
             BackendId = input.BackendId,
             SensationName = input.SensationName,
             SensationId = sensationId,
-            ZoneIdsJson = JsonSerializer.Serialize(input.ZoneIds),
-            IntensityScale = input.IntensityScale,
+            ZoneIdsJson = JsonSerializer.Serialize(zoneIds),
+            IntensityScale = intensity,
             Priority = input.Priority,
             ClientTraceId = input.ClientTraceId,
             Accepted = accepted,
@@ -205,6 +215,23 @@ internal sealed class SmitedGrpcService : SmitedService.SmitedServiceBase
         }
 
         var domain = ProtoMappers.FromProtoRegistered(sensation);
+
+        // Mirror SensationLoader's boot-time validation so a runtime
+        // registration can't slip past the backend's schema and zones —
+        // an unknown default zone or a missing required parameter would
+        // otherwise be persisted to disk and abort the next daemon
+        // startup when the loader re-validates the same file.
+        var validation = SensationValidator.Validate(domain.Definition, domain.DefaultZoneIds, backend);
+        if (validation is not null)
+        {
+            return new RegisterSensationResponse
+            {
+                Registered = false,
+                Error = $"sensation '{domain.Name}' rejected by backend '{backend.Id}': "
+                    + $"{validation.Value.Field} — {validation.Value.Message}",
+            };
+        }
+
         bool ok;
         try
         {

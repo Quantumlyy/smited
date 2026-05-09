@@ -42,6 +42,30 @@ public class HistoryFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task Trigger_records_resolved_zones_when_request_omits_them()
+    {
+        // compile_error_mild defaults to ["pectoral_l"]; the request omits
+        // zone_ids, so the coordinator resolves to the sensation defaults.
+        // History should reflect what played, not what the request carried.
+        await _fixture.Client.TriggerAsync(new TriggerRequest
+        {
+            BackendId = "mock-owo",
+            SensationName = "compile_error_mild",
+            ClientTraceId = "trace-zones",
+        });
+
+        await EventuallyAsync(async () =>
+        {
+            await using var db = await _fixture.HistoryFactory.CreateDbContextAsync();
+            var row = await db.Triggers
+                .Where(r => r.ClientTraceId == "trace-zones")
+                .FirstOrDefaultAsync();
+            row.Should().NotBeNull();
+            row!.ZoneIdsJson.Should().Contain("pectoral_l");
+        });
+    }
+
+    [Fact]
     public async Task Trigger_with_unknown_sensation_writes_a_rejected_TriggerRecord()
     {
         await _fixture.Client.TriggerAsync(new TriggerRequest

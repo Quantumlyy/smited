@@ -99,15 +99,21 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
             string.Join(",", request.ZoneIds),
             estimated);
 
+        // Create the Task.Delay synchronously here so its timer is
+        // registered with `_time` before TriggerAsync returns. Otherwise
+        // a test that calls Time.Advance immediately after Trigger races
+        // the Task.Run scheduling and the delay may fire on a later
+        // advance — or not at all in the same test.
+        var delay = estimated > TimeSpan.Zero
+            ? Task.Delay(estimated, _time, linked.Token)
+            : Task.CompletedTask;
+
         _ = Task.Run(async () =>
         {
             BackendEvent finalEvent;
             try
             {
-                if (estimated > TimeSpan.Zero)
-                {
-                    await Task.Delay(estimated, _time, linked.Token).ConfigureAwait(false);
-                }
+                await delay.ConfigureAwait(false);
                 finalEvent = new SensationCompleted(
                     Id,
                     _time.GetUtcNow(),

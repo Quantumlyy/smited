@@ -52,6 +52,9 @@
 
     <!-- Cake.Frosting build harness — debuggable C# project under build/. -->
     <PackageVersion Include="Cake.Frosting" Version="6.1.0" />
+
+    <!-- OWO Skin SDK — Windows-only; restored only by Smited.Daemon.Owo. -->
+    <PackageVersion Include="OWO" Version="2.4.2" />
   </ItemGroup>
 
 </Project>

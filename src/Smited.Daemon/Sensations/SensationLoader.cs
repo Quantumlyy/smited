@@ -3,8 +3,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Configuration;
-using Smited.V1;
-using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 using MicrosensationParameters = Smited.Daemon.Backends.Internal.MicrosensationParameters;
 
 namespace Smited.Daemon.Sensations;
@@ -151,97 +149,15 @@ internal sealed class SensationLoader : IHostedService
 
     private static void ValidateAgainstBackend(string path, SensationFileDto file, IHapticBackend backend)
     {
-        var schema = backend.Parameters;
-        var paramByName = schema.Parameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+        var microsensations = file.Definition.Microsensations
+            .Select(m => new MicrosensationParameters(m.Parameters))
+            .ToArray();
 
-        for (int i = 0; i < file.Definition.Microsensations.Count; i++)
+        var failure = SensationValidator.Validate(microsensations, file.DefaultZoneIds, backend);
+        if (failure is not null)
         {
-            var micro = file.Definition.Microsensations[i];
-            // Build a case-insensitive view of the parameter keys so the
-            // required-parameter check below matches the case-insensitive
-            // type/range check above.
-            var presentKeys = new HashSet<string>(micro.Parameters.Keys, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var (key, value) in micro.Parameters)
-            {
-                if (!paramByName.TryGetValue(key, out var def))
-                {
-                    throw new SmitedStartupException(
-                        $"In '{path}': microsensations[{i}].parameters.{key} is not declared by backend '{backend.Id}'.");
-                }
-                if (!ValueMatchesType(value, def))
-                {
-                    throw new SmitedStartupException(
-                        $"In '{path}': microsensations[{i}].parameters.{key} has wrong value type for parameter type {def.Type}.");
-                }
-                if (!ValueWithinRange(value, def, out var rangeError))
-                {
-                    throw new SmitedStartupException(
-                        $"In '{path}': microsensations[{i}].parameters.{key} is out of range — {rangeError}.");
-                }
-            }
-
-            foreach (var def in schema.Parameters)
-            {
-                if (def.Required && !presentKeys.Contains(def.Name))
-                {
-                    throw new SmitedStartupException(
-                        $"In '{path}': microsensations[{i}].parameters is missing required '{def.Name}' (backend '{backend.Id}').");
-                }
-            }
+            throw new SmitedStartupException(
+                $"In '{path}': {failure.Value.Field} — {failure.Value.Message}.");
         }
-
-        var knownZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var z in backend.Zones.Zones)
-        {
-            knownZones.Add(z.Id);
-        }
-        foreach (var g in backend.Zones.Groups)
-        {
-            knownZones.Add(g.Id);
-        }
-        foreach (var zone in file.DefaultZoneIds)
-        {
-            if (!knownZones.Contains(zone))
-            {
-                throw new SmitedStartupException(
-                    $"In '{path}': default_zone_ids contains '{zone}', not present on backend '{backend.Id}'.");
-            }
-        }
-    }
-
-    private static bool ValueMatchesType(ParameterValue value, ParameterDef def) => def.Type switch
-    {
-        ParameterType.Number => value is ParameterValue.Number,
-        ParameterType.Bool => value is ParameterValue.Bool,
-        ParameterType.String => value is ParameterValue.Text,
-        ParameterType.Duration => value is ParameterValue.Duration,
-        ParameterType.Enum => value is ParameterValue.EnumValue,
-        _ => false,
-    };
-
-    private static bool ValueWithinRange(ParameterValue value, ParameterDef def, out string? error)
-    {
-        error = null;
-        switch (value)
-        {
-            case ParameterValue.Number n:
-                if (def.HasMin && n.Value < def.Min) { error = $"{n.Value} < min {def.Min}"; return false; }
-                if (def.HasMax && n.Value > def.Max) { error = $"{n.Value} > max {def.Max}"; return false; }
-                break;
-            case ParameterValue.Duration d:
-                var seconds = d.Value.TotalSeconds;
-                if (def.HasMin && seconds < def.Min) { error = $"{seconds}s < min {def.Min}s"; return false; }
-                if (def.HasMax && seconds > def.Max) { error = $"{seconds}s > max {def.Max}s"; return false; }
-                break;
-            case ParameterValue.EnumValue e:
-                if (def.EnumValues.Count > 0 && !def.EnumValues.Contains(e.Value))
-                {
-                    error = $"'{e.Value}' is not in enum_values [{string.Join(", ", def.EnumValues)}]";
-                    return false;
-                }
-                break;
-        }
-        return true;
     }
 }

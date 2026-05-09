@@ -10,8 +10,17 @@ namespace Smited.Daemon.Triggering;
 /// </summary>
 internal abstract record TriggerOutcome(string ClientTraceId)
 {
-    public sealed record Accepted(string ClientTraceId, string SensationId)
-        : TriggerOutcome(ClientTraceId);
+    /// <summary>
+    /// Successful trigger. Carries the resolved zones and intensity that
+    /// were dispatched to the backend (which may differ from the inputs
+    /// when a named sensation supplied defaults), so call sites that
+    /// record a trigger to history reflect what actually played.
+    /// </summary>
+    public sealed record Accepted(
+        string ClientTraceId,
+        string SensationId,
+        IReadOnlyList<string> ResolvedZoneIds,
+        uint? ResolvedIntensityScale) : TriggerOutcome(ClientTraceId);
 
     public sealed record Rejected(
         string ClientTraceId,

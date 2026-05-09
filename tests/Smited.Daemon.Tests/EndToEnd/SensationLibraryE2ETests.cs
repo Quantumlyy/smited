@@ -93,6 +93,58 @@ public class SensationLibraryE2ETests : IDisposable
         response.Error.Should().NotBeNullOrEmpty();
     }
 
+    [Fact]
+    public async Task RegisterSensation_with_unknown_default_zone_is_rejected()
+    {
+        var sensation = BuildRegisteredSensation("bad_zone", backendId: "mock-owo");
+        sensation.DefaultZoneIds.Clear();
+        sensation.DefaultZoneIds.Add("nonexistent_zone");
+
+        var response = await _fixture.Client.RegisterSensationAsync(new RegisterSensationRequest
+        {
+            Sensation = sensation,
+        });
+
+        response.Registered.Should().BeFalse();
+        response.Error.Should().Contain("default_zone_ids");
+        response.Error.Should().Contain("nonexistent_zone");
+    }
+
+    [Fact]
+    public async Task RegisterSensation_missing_required_parameter_is_rejected()
+    {
+        // Build a sensation that omits the backend's required `intensity`
+        // parameter — protovalidate accepts the message shape but the
+        // backend's schema demands intensity, so the daemon should refuse
+        // to persist it (otherwise the next boot's loader aborts startup
+        // on the same file).
+        var inline = new InlineSensation();
+        var micro = new Microsensation();
+        micro.Parameters["frequency"] = new ParameterValue { Number = 50 };
+        micro.Parameters["duration"] = new ParameterValue { Duration = Duration.FromTimeSpan(TimeSpan.FromMilliseconds(250)) };
+        inline.Microsensations.Add(micro);
+
+        var sensation = new RegisteredSensation
+        {
+            Name = "missing_required",
+            BackendId = "mock-owo",
+            DisplayName = "Missing Required",
+            Description = "",
+            EstimatedDuration = Duration.FromTimeSpan(TimeSpan.FromMilliseconds(250)),
+            RegisteredAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+            Definition = inline,
+        };
+        sensation.DefaultZoneIds.Add("pectoral_l");
+
+        var response = await _fixture.Client.RegisterSensationAsync(new RegisterSensationRequest
+        {
+            Sensation = sensation,
+        });
+
+        response.Registered.Should().BeFalse();
+        response.Error.Should().Contain("intensity");
+    }
+
     private static RegisteredSensation BuildRegisteredSensation(string name, string backendId)
     {
         var inline = new InlineSensation();

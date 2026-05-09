@@ -9,11 +9,13 @@
 
   <ItemGroup>
     <!--
-      Generated proto C# is committed under gen/csharp/ for hermetic builds.
-      We compile the files directly rather than using Grpc.Tools' .proto
-      pipeline.
+      IHapticBackend, the internal trigger/stop/event records, and the
+      generated proto code all live in Smited.Daemon.Abstractions so
+      backend assemblies (including platform-conditional ones like
+      Smited.Daemon.Owo) can implement the interface without a
+      compile-time dependency on the daemon host.
     -->
-    <Compile Include="..\..\gen\csharp\**\*.cs" LinkBase="Generated" />
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,7 +24,7 @@
       Grpc.AspNetCore pulls Grpc.Tools transitively, which would otherwise
       auto-compile any .proto files in the project. We don't ship .proto;
       excluding `build` assets disables that MSBuild pipeline so it can't
-      collide with the pre-generated code above.
+      collide with the pre-generated code in Smited.Daemon.Abstractions.
     -->
     <PackageReference Include="Grpc.AspNetCore">
       <ExcludeAssets>build</ExcludeAssets>
@@ -52,8 +54,10 @@
     Smited.Daemon.Owo assembly is built and copied into the daemon's
     output directory whenever we're on Windows. ReferenceOutputAssembly
     is false because daemon source never imports OwoBackend — the
-    BackendBootstrapper loads it via Type.GetType reflection at runtime,
-    keeping the compile-time graph acyclic.
+    BackendBootstrapper loads it via Type.GetType reflection at runtime.
+    No cycle: Smited.Daemon.Owo references Smited.Daemon.Abstractions,
+    not Smited.Daemon, so this reverse reference is the only edge
+    between the two.
   -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <ProjectReference Include="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj">

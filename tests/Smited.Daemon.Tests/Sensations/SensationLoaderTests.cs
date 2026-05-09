@@ -193,7 +193,7 @@ public class SensationLoaderTests : IDisposable
         var act = () => loader.StartAsync(CancellationToken.None);
 
         await act.Should().ThrowAsync<SmitedStartupException>()
-            .WithMessage("*missing required*");
+            .WithMessage("*required parameter*is missing*");
     }
 
     [Fact]

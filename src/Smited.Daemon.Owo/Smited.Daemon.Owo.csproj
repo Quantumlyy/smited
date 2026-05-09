@@ -9,24 +9,23 @@
   </PropertyGroup>
 
   <!--
-    The Windows project references the daemon project so OwoBackend can
-    implement IHapticBackend. The daemon's reverse reference (in
-    Smited.Daemon.csproj) is conditional on Windows AND uses
-    ReferenceOutputAssembly=false so the cycle is build-graph only —
-    daemon source never imports OwoBackend; BackendBootstrapper loads
-    it via reflection at runtime.
+    The Windows project references the abstractions project (NOT the
+    daemon host) so the build graph stays acyclic. The daemon imports
+    IHapticBackend from the same Abstractions assembly and loads
+    OwoBackend via Type.GetType reflection at runtime.
   -->
   <ItemGroup>
-    <ProjectReference Include="..\Smited.Daemon\Smited.Daemon.csproj" />
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
   </ItemGroup>
 
   <!--
     OWO is a Windows-native NuGet package; only restore on Windows hosts
     so `dotnet build` on Mac produces an empty assembly without trying to
-    pull a package that won't load on non-Windows runtimes.
+    pull a package that won't load on non-Windows runtimes. Version is
+    centrally managed in Directory.Packages.props.
   -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
-    <PackageReference Include="OWO" Version="2.4.2" />
+    <PackageReference Include="OWO" />
   </ItemGroup>
 
   <!--

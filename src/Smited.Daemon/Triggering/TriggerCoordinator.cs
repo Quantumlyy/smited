@@ -114,11 +114,12 @@ internal sealed class TriggerCoordinator
 
         _active[sensationId] = active;
 
+        var resolvedIntensity = input.IntensityScale ?? resolution.DefaultIntensity;
         var request = new BackendTriggerRequest(
             sensationId,
             input.SensationName,
             resolution.ZoneIds,
-            input.IntensityScale ?? resolution.DefaultIntensity,
+            resolvedIntensity,
             input.Priority,
             input.ClientTraceId,
             resolution.Microsensations);
@@ -138,7 +139,11 @@ internal sealed class TriggerCoordinator
         }
 
         ScheduleSlotRelease(backend.Id, active, result.EstimatedDuration);
-        return new TriggerOutcome.Accepted(input.ClientTraceId, sensationId);
+        return new TriggerOutcome.Accepted(
+            input.ClientTraceId,
+            sensationId,
+            resolution.ZoneIds,
+            resolvedIntensity);
     }
 
     public async Task<int> StopAsync(BackendStopRequest request, CancellationToken ct)
