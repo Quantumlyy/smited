@@ -18,20 +18,20 @@
     -->
     <PackageVersion Include="ProtoValidate" Version="1.0.0" />
 
-    <!-- Logging + console -->
-    <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+    <!-- Logging + console (Serilog.AspNetCore 9.x targets ASP.NET Core 9). -->
+    <PackageVersion Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageVersion Include="Spectre.Console" Version="0.55.2" />
 
-    <!-- Hosting + config -->
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.7" />
+    <!-- Hosting + config (9.0.x line for net9.0 targets). -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.15" />
 
-    <!-- Tests -->
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.5.0" />
+    <!-- Tests (Mvc.Testing tracks ASP.NET Core; 10.x is net10.0-only). -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.10.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
