@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ProtoValidate;
 using Serilog;
@@ -8,6 +9,7 @@ using Smited.Daemon.Backends.Mock;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Diagnostics;
 using Smited.Daemon.Events;
+using Smited.Daemon.History;
 using Smited.Daemon.Sensations;
 using Smited.Daemon.Services;
 using Smited.Daemon.Triggering;
@@ -41,11 +43,40 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
-// Order matters: BackendBootstrapper runs first so SensationLoader sees a
-// populated BackendRegistry. IHostedService.StartAsync invokes services
-// in the order they were registered.
+// History database (daemon-internal SQLite). Registered first so the
+// schema is ready and the EventBus subscriber is attached BEFORE
+// BackendBootstrapper publishes its initial registration events —
+// otherwise the boot-time backend lifecycle rows would never be written.
+var historyOptions = builder.Configuration.GetSection("Smited:History").Get<SmitedOptions.HistoryOptions>()
+    ?? new SmitedOptions.HistoryOptions();
+var historyDbPath = HistoryDbPathResolver.Resolve(historyOptions.CustomPath);
+builder.Services.AddSingleton(new HistoryDbPath(historyDbPath));
+
+if (historyOptions.Enabled)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(historyDbPath)!);
+    builder.Services.AddDbContextFactory<HistoryDbContext>(opts =>
+        opts.UseSqlite($"Data Source={historyDbPath}"));
+    builder.Services.AddSingleton<IHistoryRecorder, HistoryRecorder>();
+    builder.Services.AddHostedService<HistoryDbInitializer>();
+    builder.Services.AddHostedService<HistoryEventBusSubscriber>();
+}
+else
+{
+    builder.Services.AddSingleton<IHistoryRecorder, NullHistoryRecorder>();
+}
+
+// Order matters: BackendBootstrapper runs after history subscriber attaches
+// so the BackendLifecycleEvent fired on registration is captured. Sensation
+// loader runs last so it sees a populated BackendRegistry.
 builder.Services.AddHostedService<BackendBootstrapper>();
 builder.Services.AddHostedService<SensationLoader>();
+
+// Retention runs last — non-critical background pruning.
+if (historyOptions.Enabled)
+{
+    builder.Services.AddHostedService<HistoryRetentionService>();
+}
 
 builder.Services.AddProtoValidate(opts =>
 {
@@ -91,7 +122,10 @@ lifetime.ApplicationStarted.Register(() =>
     var opts = app.Services.GetRequiredService<IOptions<SmitedOptions>>().Value;
     var registry = app.Services.GetRequiredService<BackendRegistry>();
     var library = app.Services.GetRequiredService<SensationLibrary>();
-    StartupBanner.Render(opts, registry.Count, library.Count);
+    var dbPath = opts.History.Enabled
+        ? app.Services.GetRequiredService<HistoryDbPath>().Value
+        : null;
+    StartupBanner.Render(opts, registry.Count, library.Count, dbPath);
 });
 
 await app.RunAsync();

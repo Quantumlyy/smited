@@ -32,6 +32,8 @@ public sealed class SmitedOptions
 
     public EventBusOptions EventBus { get; set; } = new();
 
+    public HistoryOptions History { get; set; } = new();
+
     public sealed class BackendsOptions
     {
         public bool EnableMockOwo { get; set; } = true;
@@ -48,5 +50,29 @@ public sealed class SmitedOptions
     {
         public int BufferCapacity { get; set; } = 1024;
         public string SlowSubscriberPolicy { get; set; } = "drop_oldest";
+    }
+
+    public sealed class HistoryOptions
+    {
+        /// <summary>
+        /// When <c>false</c>, the daemon registers a no-op recorder and skips
+        /// creating or opening the history database. Useful for tests and for
+        /// users who don't want a database file.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Number of days to retain rows. Set to <c>0</c> to keep history
+        /// forever (database grows unbounded). Default 30.
+        /// </summary>
+        public int RetentionDays { get; set; } = 30;
+
+        /// <summary>
+        /// Optional override for the database path. When unset, the daemon
+        /// resolves a platform-appropriate location under
+        /// <c>$XDG_DATA_HOME/smited/history.db</c> or
+        /// <c>%LOCALAPPDATA%\smited\history.db</c>.
+        /// </summary>
+        public string? CustomPath { get; set; }
     }
 }

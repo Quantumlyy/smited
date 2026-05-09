@@ -105,3 +105,8 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:Sensations:LibraryRoot` | `./sensations` | Resolved relative to the binary |
 | `Smited:EventBus:BufferCapacity` | `1024` | Per-subscriber channel capacity |
 | `Smited:EventBus:SlowSubscriberPolicy` | `drop_oldest` | Channel `FullMode` for slow consumers |
+| `Smited:History:Enabled` | `true` | Set false to skip the history DB entirely |
+| `Smited:History:RetentionDays` | `30` | Days to keep rows; `0` = forever |
+| `Smited:History:CustomPath` | _unset_ | Override the SQLite path |
+
+History is daemon-internal — see [`docs/history.md`](history.md) for the schema and example queries.

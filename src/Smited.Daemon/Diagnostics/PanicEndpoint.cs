@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.History;
 using Smited.Daemon.Triggering;
 
 namespace Smited.Daemon.Diagnostics;
@@ -26,10 +27,13 @@ internal static class PanicEndpoint
         var handler = async (
             HttpContext ctx,
             TriggerCoordinator coordinator,
+            IHistoryRecorder history,
+            TimeProvider time,
             ILogger<PanicMarker> log) =>
         {
             var peer = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             var userAgent = ctx.Request.Headers.UserAgent.ToString();
+            var timestamp = time.GetUtcNow();
 
             log.LogCritical(
                 "PANIC stop requested from {Peer} (UA: {UserAgent})",
@@ -49,6 +53,15 @@ internal static class PanicEndpoint
                 log.LogCritical(ex,
                     "PANIC stop FAILED from {Peer}; coordinator threw",
                     peer);
+                _ = history.RecordPanicAsync(new PanicRecord
+                {
+                    Timestamp = timestamp,
+                    Peer = peer,
+                    UserAgent = userAgent,
+                    Ok = false,
+                    StoppedCount = 0,
+                    Error = ex.Message,
+                });
                 ctx.Response.StatusCode = 500;
                 await ctx.Response.WriteAsJsonAsync(new
                 {
@@ -61,6 +74,23 @@ internal static class PanicEndpoint
             log.LogCritical(
                 "PANIC stop completed from {Peer}, {StoppedCount} sensation(s) cancelled",
                 peer, stopped);
+
+            // History: one panic row plus a paired stop row.
+            _ = history.RecordPanicAsync(new PanicRecord
+            {
+                Timestamp = timestamp,
+                Peer = peer,
+                UserAgent = userAgent,
+                Ok = true,
+                StoppedCount = stopped,
+            });
+            _ = history.RecordStopAsync(new StopRecord
+            {
+                Timestamp = timestamp,
+                Source = "panic",
+                All = true,
+                StoppedCount = stopped,
+            });
 
             await ctx.Response.WriteAsJsonAsync(new
             {

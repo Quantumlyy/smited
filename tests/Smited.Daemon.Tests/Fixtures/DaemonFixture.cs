@@ -4,6 +4,7 @@ using Grpc.Net.Client;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
 using Smited.Daemon.Events;
+using Smited.Daemon.History;
 using Smited.Daemon.Sensations;
 using Smited.V1;
 
@@ -61,6 +63,8 @@ internal sealed class DaemonFixture : IDisposable
                         ["Smited:Sensations:LibraryRoot"] = _libraryRoot,
                         ["Smited:Backends:EnableMockOwo"] = "true",
                         ["Smited:Backends:EnableOwo"] = "false",
+                        ["Smited:History:Enabled"] = "true",
+                        ["Smited:History:CustomPath"] = Path.Combine(_libraryRoot, "history.db"),
                         ["Serilog:MinimumLevel"] = "Warning",
                     });
                 });
@@ -116,6 +120,13 @@ internal sealed class DaemonFixture : IDisposable
 
     /// <summary>The mock backend's controller surface.</summary>
     public IMockOwoController MockController => _factory.Services.GetRequiredService<IMockOwoController>();
+
+    /// <summary>
+    /// Factory for the in-process SQLite history database, so tests can
+    /// query the rows the daemon wrote.
+    /// </summary>
+    public IDbContextFactory<HistoryDbContext> HistoryFactory =>
+        _factory.Services.GetRequiredService<IDbContextFactory<HistoryDbContext>>();
 
     public string LibraryRoot => _libraryRoot;
 

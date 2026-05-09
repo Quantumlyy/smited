@@ -10,7 +10,11 @@ namespace Smited.Daemon.Diagnostics;
 /// </summary>
 internal static class StartupBanner
 {
-    public static void Render(SmitedOptions options, int backendCount, int sensationCount)
+    public static void Render(
+        SmitedOptions options,
+        int backendCount,
+        int sensationCount,
+        string? historyDbPath)
     {
         var grid = new Grid().AddColumn().AddColumn();
 
@@ -24,6 +28,11 @@ internal static class StartupBanner
 
         grid.AddRow("[aquamarine1]Backends[/]", $"[gold1]{backendCount} registered[/]");
         grid.AddRow("[aquamarine1]Sensations[/]", $"[gold1]{sensationCount} loaded[/]");
+        grid.AddRow(
+            "[aquamarine1]History[/]",
+            options.History.Enabled && historyDbPath is not null
+                ? $"[gold1]{Markup.Escape(historyDbPath)}[/]"
+                : "[grey]disabled[/]");
 
         AnsiConsole.Write(
             new Panel(grid)

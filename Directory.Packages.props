@@ -29,6 +29,11 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.15" />
 
+    <!-- EF Core + SQLite for the daemon-internal history database. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.15" />
+
     <!-- Tests (Mvc.Testing tracks ASP.NET Core; 10.x is net10.0-only). -->
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.15" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.10.0" />
