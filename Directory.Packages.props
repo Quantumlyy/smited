@@ -42,6 +42,16 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <!-- FluentAssertions 7.x is MIT; 8.x switched to a commercial Xceed license. -->
     <PackageVersion Include="FluentAssertions" Version="7.2.2" />
+    <!--
+      NSubstitute is for simple-interface verification tests
+      (IHistoryRecorder, ILogger). Hand-rolled fakes stay for richer
+      interfaces like IHapticBackend.
+    -->
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <PackageVersion Include="NSubstitute.Analyzers.CSharp" Version="1.0.17" />
+
+    <!-- Cake.Frosting build harness — debuggable C# project under build/. -->
+    <PackageVersion Include="Cake.Frosting" Version="6.1.0" />
   </ItemGroup>
 
 </Project>

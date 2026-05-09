@@ -42,6 +42,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+    <!-- NSubstitute's DynamicProxy needs visibility into internal types
+         it's asked to substitute (e.g. IHistoryRecorder). -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 
   <!--

@@ -3,6 +3,7 @@ bin/
 obj/
 out/
 artifacts/
+publish/
 
 # Logs (Serilog rolling files)
 logs/

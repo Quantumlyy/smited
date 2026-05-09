@@ -34,7 +34,9 @@ internal sealed class DaemonFixture : IDisposable
     private readonly string _userConfigDir;
     private readonly string? _previousUserConfigDir;
 
-    public DaemonFixture(Action<string>? seed = null)
+    public DaemonFixture(
+        Action<string>? seed = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         _libraryRoot = Path.Combine(Path.GetTempPath(), "smited-fixture-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_libraryRoot);
@@ -72,6 +74,7 @@ internal sealed class DaemonFixture : IDisposable
                 {
                     services.RemoveAll<TimeProvider>();
                     services.AddSingleton<TimeProvider>(Time);
+                    configureServices?.Invoke(services);
                 });
             });
 

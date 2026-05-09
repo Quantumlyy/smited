@@ -36,12 +36,23 @@ The full grpcurl cheatsheet is in [`docs/grpcurl-cheatsheet.md`](docs/grpcurl-ch
 
 The wire format is published at [`buf.build/quantumly-labs/smited`](https://buf.build/quantumly-labs/smited) and pinned to **`v0.1.0`** for this build. The schema source lives in [`Quantumlyy/smited-schema`](https://github.com/Quantumlyy/smited-schema). Generated C# is consumed via `buf generate` and committed under `gen/csharp/` for hermetic builds — no `buf` install required to build the daemon.
 
+## Building
+
+```sh
+./build.sh                              # restore + build + test
+./build.sh --target Publish-OSX-arm64   # self-contained single-file binary in artifacts/
+```
+
+See [`docs/building.md`](docs/building.md) for the full Cake target list.
+
 ## Documentation
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — layer diagram, EventBus model, validation split, backend abstraction contract.
 - [`docs/running.md`](docs/running.md) — running on Mac, expected log output, smoke tests, Streamdeck panic-button setup.
+- [`docs/building.md`](docs/building.md) — Cake build script, publish targets, why Cake.
 - [`docs/grpcurl-cheatsheet.md`](docs/grpcurl-cheatsheet.md) — example grpcurl invocations for every RPC.
 - [`docs/adding-a-backend.md`](docs/adding-a-backend.md) — how to add a new `IHapticBackend` implementation.
+- [`docs/history.md`](docs/history.md) — the daemon's SQLite history database: tables, queries, retention.
 - [`sensations/README.md`](sensations/README.md) — sensation file format reference.
 
 ## Status
