@@ -1,0 +1,118 @@
+using FluentAssertions;
+using Google.Protobuf.WellKnownTypes;
+using Smited.Daemon.Tests.Fixtures;
+using Smited.V1;
+using Xunit;
+
+namespace Smited.Daemon.Tests.EndToEnd;
+
+public class SensationLibraryE2ETests : IDisposable
+{
+    private readonly DaemonFixture _fixture;
+
+    public SensationLibraryE2ETests()
+    {
+        _fixture = new DaemonFixture(seed: root =>
+        {
+            SampleSensations.WriteOwo(root, "compile_error_mild.json", SampleSensations.CompileErrorMild);
+            SampleSensations.WriteOwo(root, "deploy_success.json", SampleSensations.DeploySuccess);
+        });
+    }
+
+    public void Dispose() => _fixture.Dispose();
+
+    [Fact]
+    public async Task ListSensations_returns_files_loaded_at_boot()
+    {
+        var response = await _fixture.Client.ListSensationsAsync(new ListSensationsRequest());
+
+        response.Sensations.Select(s => s.Name).Should().BeEquivalentTo(
+            "compile_error_mild", "deploy_success");
+    }
+
+    [Fact]
+    public async Task ListSensations_filters_by_tag()
+    {
+        var request = new ListSensationsRequest();
+        request.Tags.Add("success");
+
+        var response = await _fixture.Client.ListSensationsAsync(request);
+
+        response.Sensations.Select(s => s.Name).Should().BeEquivalentTo("deploy_success");
+    }
+
+    [Fact]
+    public async Task RegisterSensation_succeeds_for_a_capability_carrying_backend()
+    {
+        var sensation = BuildRegisteredSensation("brand_new", backendId: "mock-owo");
+
+        var response = await _fixture.Client.RegisterSensationAsync(new RegisterSensationRequest
+        {
+            Sensation = sensation,
+            Overwrite = false,
+        });
+
+        response.Registered.Should().BeTrue();
+        response.Error.Should().BeEmpty();
+
+        // ListSensations sees the new entry.
+        var list = await _fixture.Client.ListSensationsAsync(new ListSensationsRequest());
+        list.Sensations.Select(s => s.Name).Should().Contain("brand_new");
+    }
+
+    [Fact]
+    public async Task UnregisterSensation_round_trips()
+    {
+        var sensation = BuildRegisteredSensation("ephemeral", backendId: "mock-owo");
+        await _fixture.Client.RegisterSensationAsync(new RegisterSensationRequest
+        {
+            Sensation = sensation,
+            Overwrite = false,
+        });
+
+        var response = await _fixture.Client.UnregisterSensationAsync(new UnregisterSensationRequest
+        {
+            BackendId = "mock-owo",
+            Name = "ephemeral",
+        });
+
+        response.Unregistered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RegisterSensation_for_unknown_backend_returns_registered_false_with_error()
+    {
+        var sensation = BuildRegisteredSensation("xyz", backendId: "no-such-backend");
+
+        var response = await _fixture.Client.RegisterSensationAsync(new RegisterSensationRequest
+        {
+            Sensation = sensation,
+        });
+
+        response.Registered.Should().BeFalse();
+        response.Error.Should().NotBeNullOrEmpty();
+    }
+
+    private static RegisteredSensation BuildRegisteredSensation(string name, string backendId)
+    {
+        var inline = new InlineSensation();
+        var micro = new Microsensation();
+        micro.Parameters["frequency"] = new ParameterValue { Number = 40 };
+        micro.Parameters["intensity"] = new ParameterValue { Number = 50 };
+        micro.Parameters["duration"] = new ParameterValue { Duration = Duration.FromTimeSpan(TimeSpan.FromMilliseconds(250)) };
+        inline.Microsensations.Add(micro);
+
+        var registered = new RegisteredSensation
+        {
+            Name = name,
+            BackendId = backendId,
+            DisplayName = name.Replace('_', ' '),
+            Description = "",
+            EstimatedDuration = Duration.FromTimeSpan(TimeSpan.FromMilliseconds(250)),
+            RegisteredAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+            Definition = inline,
+        };
+        registered.DefaultZoneIds.Add("pectoral_l");
+        return registered;
+    }
+}

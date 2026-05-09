@@ -84,7 +84,6 @@ public class MockOwoBackendTests
         result.EstimatedDuration.Should().Be(TimeSpan.FromSeconds(2));
 
         var enumerator = backend.Events.GetAsyncEnumerator();
-        await using var ___ = enumerator;
 
         (await NextWithin(enumerator, TimeSpan.FromSeconds(1))).Should().BeOfType<SensationStarted>();
 
@@ -104,7 +103,6 @@ public class MockOwoBackendTests
         await backend.TriggerAsync(request, CancellationToken.None);
 
         var enumerator = backend.Events.GetAsyncEnumerator();
-        await using var ___ = enumerator;
         (await NextWithin(enumerator, TimeSpan.FromSeconds(1))).Should().BeOfType<SensationStarted>();
 
         var stopped = await backend.StopAsync(new BackendStopRequest("s1", All: false), CancellationToken.None);
@@ -135,7 +133,6 @@ public class MockOwoBackendTests
         ((IMockOwoController)backend).SetCalibrated(false, time.GetUtcNow());
 
         var enumerator = backend.Events.GetAsyncEnumerator();
-        await using var ___ = enumerator;
         var evt = await NextWithin(enumerator, TimeSpan.FromSeconds(1));
         evt.Should().BeOfType<CalibrationChangedEvent>()
             .Which.NewState.Calibrated.Should().BeFalse();
