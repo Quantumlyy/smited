@@ -223,7 +223,46 @@ public sealed class OwoBackend : IHapticBackend
     {
         Status = BackendStatus.Disconnected;
 
-        _sdk.Configure(_options.GameDisplayName);
+        // Resolve the .owoauth contents (if any) before Configure. The
+        // SDK's GameAuth.Parse path is what MyOWO requires; the no-auth
+        // GameAuth.Create() path is enough for the OWO Visualizer (the
+        // canonical dev target) but produces an unsigned auth that the
+        // MyOWO consumer app silently ignores. AuthFilePath wins over
+        // AuthString when both are set; that ordering keeps file-based
+        // production deployments deterministic when a misconfigured
+        // descriptor specifies both.
+        string? authString = null;
+        if (!string.IsNullOrEmpty(_options.AuthFilePath))
+        {
+            if (!string.IsNullOrEmpty(_options.AuthString))
+            {
+                _logger.LogWarning(
+                    "OWO backend {Id} has both AuthFilePath and AuthString set; using AuthFilePath",
+                    Id);
+            }
+            try
+            {
+                authString = await File.ReadAllTextAsync(_options.AuthFilePath, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Misconfiguration the user must fix — bad path, no
+                // permissions, etc. Throw the typed
+                // BackendConfigurationException so the bootstrapper
+                // attributes the failure cleanly and aborts startup
+                // (same behaviour as SmitedStartupException).
+                throw new BackendConfigurationException(
+                    Id, Kind,
+                    $"Could not read AuthFilePath '{_options.AuthFilePath}': {ex.Message}",
+                    ex);
+            }
+        }
+        else if (!string.IsNullOrEmpty(_options.AuthString))
+        {
+            authString = _options.AuthString;
+        }
+
+        _sdk.Configure(_options.ProjectId, authString);
 
         var deadline = _options.ConnectTimeoutSeconds > 0
             ? TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds)

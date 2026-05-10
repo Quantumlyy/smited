@@ -69,7 +69,7 @@ See [`docs/building.md`](docs/building.md) for the full Cake target list.
 
 ## Status
 
-This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. The Windows OWO Skin backend in `src/Smited.Daemon.Owo/` is wired against the official OWO C# SDK — see [`docs/owo.md`](docs/owo.md) for setup, the smoke-test runbook, and TENS safety notes. The daemon is LAN/localhost only — no TLS, no auth.
+This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. The Windows OWO Skin backend in `src/Smited.Daemon.Owo/` is wired against the official OWO C# SDK — for development, the canonical target is the **OWO Visualizer** (downloadable from `owogame.com/developers/`); the MyOWO consumer app is the production path and requires a registered project ID + `.owoauth` from `devs@owogame.com`. See [`docs/owo.md`](docs/owo.md) for setup, the smoke-test runbook, and TENS safety notes. The daemon is LAN/localhost only — no TLS, no auth.
 
 ## License
 
