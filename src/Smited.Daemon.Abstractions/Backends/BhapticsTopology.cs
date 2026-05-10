@@ -72,6 +72,51 @@ public static class BhapticsTopology
     }
 
     /// <summary>
+    /// Expand a list of zone or zone-group IDs into a deduplicated list
+    /// of motor-zone IDs. Group IDs are looked up in
+    /// <paramref name="topology"/>'s <see cref="ZoneTopology.Groups"/> and
+    /// replaced with their members; motor IDs are passed through.
+    /// Insertion order is preserved (first occurrence wins) and
+    /// duplicates are dropped — sending the same motor twice in one
+    /// frame is wasted protocol bytes and the Player would just take
+    /// the latest anyway.
+    ///
+    /// The trigger coordinator validates that every input ID is either
+    /// a known zone or a known group, so unknown IDs at this layer
+    /// indicate a programming error rather than user input.
+    /// </summary>
+    public static IReadOnlyList<string> ExpandGroupZoneIds(
+        ZoneTopology topology,
+        IEnumerable<string> zoneOrGroupIds)
+    {
+        ArgumentNullException.ThrowIfNull(topology);
+        ArgumentNullException.ThrowIfNull(zoneOrGroupIds);
+
+        var groupLookup = topology.Groups.ToDictionary(
+            g => g.Id,
+            g => (IReadOnlyList<string>)g.ZoneIds,
+            StringComparer.OrdinalIgnoreCase);
+
+        var expanded = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in zoneOrGroupIds)
+        {
+            if (groupLookup.TryGetValue(id, out var members))
+            {
+                foreach (var m in members)
+                {
+                    if (seen.Add(m)) expanded.Add(m);
+                }
+            }
+            else if (seen.Add(id))
+            {
+                expanded.Add(id);
+            }
+        }
+        return expanded;
+    }
+
+    /// <summary>
     /// Build the parameter schema for bHaptics. Three parameters:
     /// <c>intensity</c> (0..100, %), <c>duration</c> (0..10s — matches
     /// bHaptics Player's per-effect cap), and an optional <c>frequency</c>

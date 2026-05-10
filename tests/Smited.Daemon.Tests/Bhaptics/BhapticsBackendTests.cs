@@ -8,6 +8,8 @@ using Smited.Daemon.Bhaptics.WebSocket;
 using Smited.Daemon.Tests.Bhaptics.Fixtures;
 using Smited.V1;
 using Xunit;
+using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
+using MicrosensationParameters = Smited.Daemon.Backends.Internal.MicrosensationParameters;
 
 namespace Smited.Daemon.Tests.Bhaptics;
 
@@ -132,6 +134,112 @@ public class BhapticsBackendTests
             .Which.Reason.Should().Be("accessories_absent");
 
         backend.Zones.Zones.Should().HaveCount(40);
+    }
+
+    [Fact]
+    public async Task Trigger_with_group_zone_id_expands_to_constituent_motor_indices()
+    {
+        await using var sim = await BhapticsPlayerSimulator.StartAsync();
+        await using var backend = NewBackend(sim.Endpoint);
+        await backend.ConnectAsync(CancellationToken.None);
+
+        var request = MakeRequest(new[] { "front_chest" }, intensity: 60, durationMs: 400);
+        await backend.TriggerAsync(request, CancellationToken.None);
+
+        var frame = await ReceiveWithin(sim.ReceivedFrames, TimeSpan.FromSeconds(2));
+        var entry = frame.GetProperty("submit")[0];
+        entry.GetProperty("frame").GetProperty("position").GetInt32().Should().Be((int)Position.VestFront);
+
+        var dots = entry.GetProperty("frame").GetProperty("dotPoints");
+        dots.GetArrayLength().Should().Be(8, "front_chest expands to vest_front_0..7");
+        var indices = Enumerable.Range(0, dots.GetArrayLength())
+            .Select(i => dots[i].GetProperty("index").GetInt32())
+            .OrderBy(i => i)
+            .ToArray();
+        indices.Should().Equal(0, 1, 2, 3, 4, 5, 6, 7);
+        Enumerable.Range(0, dots.GetArrayLength())
+            .Select(i => dots[i].GetProperty("intensity").GetInt32())
+            .Should().AllSatisfy(v => v.Should().Be(60));
+    }
+
+    [Fact]
+    public async Task Trigger_with_torso_group_submits_one_frame_per_half()
+    {
+        await using var sim = await BhapticsPlayerSimulator.StartAsync();
+        await using var backend = NewBackend(sim.Endpoint);
+        await backend.ConnectAsync(CancellationToken.None);
+
+        var request = MakeRequest(new[] { "torso" }, intensity: 75, durationMs: 200);
+        await backend.TriggerAsync(request, CancellationToken.None);
+
+        var frameA = await ReceiveWithin(sim.ReceivedFrames, TimeSpan.FromSeconds(2));
+        var frameB = await ReceiveWithin(sim.ReceivedFrames, TimeSpan.FromSeconds(2));
+
+        var positions = new[] { frameA, frameB }
+            .Select(f => f.GetProperty("submit")[0].GetProperty("frame").GetProperty("position").GetInt32())
+            .OrderBy(p => p)
+            .ToArray();
+        positions.Should().Equal((int)Position.VestFront, (int)Position.VestBack);
+
+        foreach (var f in new[] { frameA, frameB })
+        {
+            var dots = f.GetProperty("submit")[0].GetProperty("frame").GetProperty("dotPoints");
+            dots.GetArrayLength().Should().Be(20,
+                "each half contributes its 20 motors as a separate frame so motor indices don't collide");
+        }
+    }
+
+    [Fact]
+    public async Task Trigger_after_Player_disconnect_throws_synchronously()
+    {
+        await using var sim = await BhapticsPlayerSimulator.StartAsync();
+        await using var backend = NewBackend(sim.Endpoint);
+        await backend.ConnectAsync(CancellationToken.None);
+
+        var enumerator = backend.Events.GetAsyncEnumerator();
+
+        await sim.CloseAsync();
+
+        // Wait for OnDisconnected to flip _status before retrying the trigger.
+        var lifecycle = await NextWithin(enumerator, TimeSpan.FromSeconds(2));
+        lifecycle.Should().BeOfType<BackendLifecycleEvent>()
+            .Which.Snapshot.Status.Should().Be(BackendStatus.Disconnected);
+
+        var act = () => backend.TriggerAsync(MakeRequest(new[] { "front_chest" }, 50, 200), CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(ex => ex.Message.Contains("Disconnected"));
+    }
+
+    private static BackendTriggerRequest MakeRequest(IReadOnlyList<string> zoneIds, int intensity, int durationMs)
+    {
+        var micro = new MicrosensationParameters(new Dictionary<string, ParameterValue>
+        {
+            ["intensity"] = new ParameterValue.Number(intensity),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(durationMs)),
+        });
+        return new BackendTriggerRequest(
+            SensationId: Guid.NewGuid().ToString("N")[..16],
+            SensationName: "test",
+            ZoneIds: zoneIds,
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { micro });
+    }
+
+    private static async Task<System.Text.Json.JsonElement> ReceiveWithin(
+        System.Threading.Channels.ChannelReader<System.Text.Json.JsonElement> reader,
+        TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            return await reader.ReadAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException($"No frame received within {timeout}.");
+        }
     }
 
     private static BhapticsBackend NewBackend(Uri endpoint)

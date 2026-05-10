@@ -110,7 +110,20 @@ public sealed class BhapticsBackend : IHapticBackend
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var client = _client ?? throw new InvalidOperationException("BhapticsBackend is not connected.");
+        // Reject synchronously when the Player isn't connected. Without
+        // this check, _client wraps a closed socket after OnDisconnected
+        // and the trigger gets accepted=true to the caller, then fails
+        // asynchronously inside SendAsync — surfacing as a stray
+        // SensationCancelled with reason "playback_error". The
+        // coordinator catches this exception and returns accepted=false
+        // with the message, which is the right shape for the gRPC
+        // client.
+        if (_status != BackendStatus.Ready || _client is null)
+        {
+            throw new InvalidOperationException(
+                $"BhapticsBackend cannot trigger: status is {_status}. Is bHaptics Player running and connected?");
+        }
+        var client = _client;
 
         var estimated = ComputeEstimatedDuration(request);
         var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -178,8 +191,26 @@ public sealed class BhapticsBackend : IHapticBackend
         ActivePlayback playback,
         CancellationToken ct)
     {
-        var position = ZoneIndexMap.EnclosingPosition(request.ZoneIds);
-        var motorIndices = request.ZoneIds.Select(ZoneIndexMap.Resolve).Select(t => t.motorIndex).ToArray();
+        // The coordinator validates that every entry in request.ZoneIds
+        // is either a known motor zone or a known group; expand groups
+        // here so we resolve only motor IDs through ZoneIndexMap. The
+        // sample sensations under sensations/bhaptics_tactsuit/ all
+        // target groups (front_chest, torso, back_shoulders), which is
+        // why this expansion has to happen before the dot pattern is
+        // built.
+        var motorZones = BhapticsTopology.ExpandGroupZoneIds(_zones, request.ZoneIds);
+
+        // Group motor zones by their resolved Position. A "torso"
+        // trigger spans both halves of the vest, which has to ship as
+        // two frames (one VestFront, one VestBack) rather than one
+        // Position.Vest frame — motor index 5 means a different motor
+        // on each half, so a single Vest frame would collide.
+        // Accessory zones (gloves/sleeves) get their own per-Position
+        // frames the same way.
+        var positionGroups = motorZones
+            .Select(ZoneIndexMap.Resolve)
+            .GroupBy(t => t.position, t => t.motorIndex)
+            .ToArray();
 
         foreach (var micro in request.Microsensations)
         {
@@ -189,9 +220,12 @@ public sealed class BhapticsBackend : IHapticBackend
             var duration = ReadDuration(micro, "duration");
             if (duration <= TimeSpan.Zero) continue;
 
-            var dots = motorIndices.Select(idx => new DotPoint(idx, intensity)).ToArray();
-            var key = await client.SubmitDotPatternAsync(position, dots, duration, ct).ConfigureAwait(false);
-            playback.AddPatternKey(key);
+            foreach (var group in positionGroups)
+            {
+                var dots = group.Select(idx => new DotPoint(idx, intensity)).ToArray();
+                var key = await client.SubmitDotPatternAsync(group.Key, dots, duration, ct).ConfigureAwait(false);
+                playback.AddPatternKey(key);
+            }
 
             await Task.Delay(duration, _time, ct).ConfigureAwait(false);
         }
