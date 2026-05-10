@@ -58,63 +58,77 @@ internal static class BackendsServiceCollectionExtensions
             return services;
         }
 
-        var factoryType = TryLoadType(
-            "Smited.Daemon.Owo.OwoBackendFactory, Smited.Daemon.Owo",
-            "OwoBackendFactory");
-        if (factoryType is not null)
-        {
-            services.TryAddEnumerable(
-                ServiceDescriptor.Singleton(typeof(IBackendFactory), factoryType));
-        }
-
-        var sdkType = TryLoadType(
-            "Smited.Daemon.Owo.StaticOwoSdk, Smited.Daemon.Owo",
-            "StaticOwoSdk");
-        if (sdkType is not null)
-        {
-            services.AddSingleton(typeof(IOwoSdk), sdkType);
-        }
-
-        return services;
-    }
-
-    private static Type? TryLoadType(string assemblyQualifiedName, string shortName)
-    {
+        Type? factoryType;
+        Type? sdkType;
         try
         {
-            var type = Type.GetType(assemblyQualifiedName);
-            if (type is null)
-            {
-                Console.Error.WriteLine(
-                    $"warn: Skipping {shortName} registration; the "
-                    + "Smited.Daemon.Owo assembly is not in the output "
-                    + "directory. Rebuild/republish to land it.");
-            }
-            return type;
+            factoryType = Type.GetType("Smited.Daemon.Owo.OwoBackendFactory, Smited.Daemon.Owo");
+            sdkType = Type.GetType("Smited.Daemon.Owo.StaticOwoSdk, Smited.Daemon.Owo");
         }
         catch (Exception ex)
         {
-            // Broad catch is intentional. Any failure to resolve the OWO
-            // type means the assembly is unusable in this environment —
-            // missing file, wrong architecture (BadImageFormatException),
-            // missing transitive dependency (FileNotFoundException /
-            // FileLoadException), corrupt PE, type-resolution failure
-            // (TypeLoadException / ReflectionTypeLoadException),
-            // PlatformNotSupportedException on a downlevel runtime, and so
-            // on. The recoverable set is open-ended and the right response
-            // is uniform: register no factory and let the daemon continue
-            // without OWO support. A narrower filter regressed
-            // BadImageFormatException coverage in a previous round and
-            // crashed daemon startup on misconfigured Windows installs.
-            // Don't re-tighten without checking which exception types this
-            // is load-bearing for.
+            // Broad catch is intentional. Any failure to resolve an
+            // OWO type means the assembly is unusable in this
+            // environment — missing file, wrong architecture
+            // (BadImageFormatException), missing transitive dependency
+            // (FileNotFoundException / FileLoadException), corrupt
+            // PE, type-resolution failure (TypeLoadException /
+            // ReflectionTypeLoadException), PlatformNotSupportedException
+            // on a downlevel runtime, and so on. The recoverable set
+            // is open-ended and the right response is uniform: log
+            // and continue without OWO support. A narrower filter
+            // regressed BadImageFormatException coverage in a
+            // previous round and crashed daemon startup on
+            // misconfigured Windows installs. Don't re-tighten
+            // without checking which exception types this is
+            // load-bearing for.
             Console.Error.WriteLine(
-                $"warn: Skipping {shortName} registration; reflective load "
-                + $"threw {ex.GetType().Name}. Daemon will continue without "
-                + "OWO support; verify the Smited.Daemon.Owo assembly and "
-                + "OWO.dll runtime files are present and built for the "
-                + $"current architecture. Underlying error: {ex.Message}");
-            return null;
+                $"warn: OWO assembly load failed ({ex.GetType().Name}). "
+                + "Daemon will continue without OWO support; verify the "
+                + "Smited.Daemon.Owo assembly and OWO.dll runtime files "
+                + "are present and built for the current architecture. "
+                + $"Underlying error: {ex.Message}");
+            return services;
         }
+
+        // Atomic registration: factory and SDK go in together, or
+        // neither does. A factory registered without its IOwoSdk
+        // dependency would throw at TryCreate time when the
+        // descriptor reaches it; round-N+6's narrow exception
+        // classifier in BackendBootstrapper correctly treats that
+        // throw as user-fixable misconfiguration and aborts startup.
+        // The right place to handle the partial-load case is here,
+        // up-front, with a clear warning naming the actual
+        // filesystem state — not at first-trigger time.
+        if (factoryType is null || sdkType is null)
+        {
+            // Asymmetric diagnostics: each partial-load shape gets a
+            // message naming what's missing so the user knows where
+            // to look. Both-null is the no-OWO-installed case
+            // (expected on a non-OWO machine) and stays silent —
+            // logging would noise up every Mac/Linux startup.
+            if (factoryType is not null && sdkType is null)
+            {
+                Console.Error.WriteLine(
+                    "warn: OWO factory type loaded but StaticOwoSdk did not. "
+                    + "This indicates a partial OWO assembly install. "
+                    + "Skipping OWO registration; daemon continues without "
+                    + "OWO support. Rebuild/republish to refresh the OWO "
+                    + "runtime files.");
+            }
+            else if (factoryType is null && sdkType is not null)
+            {
+                Console.Error.WriteLine(
+                    "warn: OWO StaticOwoSdk type loaded but OwoBackendFactory "
+                    + "did not. This indicates a partial OWO assembly "
+                    + "install. Skipping OWO registration.");
+            }
+            return services;
+        }
+
+        services.AddSingleton(typeof(IOwoSdk), sdkType);
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton(typeof(IBackendFactory), factoryType));
+        return services;
     }
 }
