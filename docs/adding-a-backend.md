@@ -32,6 +32,14 @@ public sealed class HapticVestBackend : IHapticBackend
     public CalibrationState? Calibration { get; private set; }
     public Struct? Extras => null;
 
+    // Manufacturer-mandated forbidden regions; non-overridable.
+    // Backends with no manufacturer-stated bans return Empty; see
+    // step 6 below for when to populate this and docs/body-map.md
+    // for the smited-default forbidden regions every backend
+    // inherits on top.
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } =
+        ImmutableHashSet<BodyRegion>.Empty;
+
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
     public Task ConnectAsync(CancellationToken ct) { /* open the device */ }
