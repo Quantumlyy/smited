@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Events;
 using Smited.Daemon.History;
 using Smited.Daemon.Sensations;
@@ -92,26 +93,53 @@ internal sealed class DaemonFixture : IDisposable
             });
 
         // Force the host to boot so backends register and sensations load
-        // before the first test method touches the fixture.
-        var handler = _factory.Server.CreateHandler();
-        PanicHttpClient = new HttpClient(handler)
+        // before the first test method touches the fixture. Wrapped in
+        // try/catch so a boot failure (e.g. invalid descriptor config)
+        // doesn't leak the env-var override or the temp library root —
+        // the test that intentionally provokes the failure asserts on
+        // the exception and then xunit moves on without ever calling
+        // Dispose.
+        try
         {
-            BaseAddress = _factory.Server.BaseAddress,
-            DefaultRequestVersion = new Version(1, 1),
-        };
+            var handler = _factory.Server.CreateHandler();
+            PanicHttpClient = new HttpClient(handler)
+            {
+                BaseAddress = _factory.Server.BaseAddress,
+                DefaultRequestVersion = new Version(1, 1),
+            };
 
-        var grpcHandler = _factory.Server.CreateHandler();
-        var grpcHttp = new HttpClient(new ForceHttp2Handler(grpcHandler))
+            var grpcHandler = _factory.Server.CreateHandler();
+            var grpcHttp = new HttpClient(new ForceHttp2Handler(grpcHandler))
+            {
+                BaseAddress = _factory.Server.BaseAddress,
+                DefaultRequestVersion = new Version(2, 0),
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+            };
+            Channel = GrpcChannel.ForAddress(_factory.Server.BaseAddress, new GrpcChannelOptions
+            {
+                HttpClient = grpcHttp,
+            });
+            Client = new SmitedService.SmitedServiceClient(Channel);
+        }
+        catch
         {
-            BaseAddress = _factory.Server.BaseAddress,
-            DefaultRequestVersion = new Version(2, 0),
-            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
-        };
-        Channel = GrpcChannel.ForAddress(_factory.Server.BaseAddress, new GrpcChannelOptions
+            CleanUpAfterFailedBoot();
+            throw;
+        }
+    }
+
+    private void CleanUpAfterFailedBoot()
+    {
+        try { _factory.Dispose(); } catch { }
+        Environment.SetEnvironmentVariable("SMITED_CONFIG_DIR", _previousUserConfigDir);
+        try
         {
-            HttpClient = grpcHttp,
-        });
-        Client = new SmitedService.SmitedServiceClient(Channel);
+            if (_ownsLibraryRoot && Directory.Exists(_libraryRoot))
+            {
+                Directory.Delete(_libraryRoot, recursive: true);
+            }
+        }
+        catch { }
     }
 
     /// <summary>The shared <see cref="FakeTimeProvider"/>.</summary>
@@ -136,6 +164,14 @@ internal sealed class DaemonFixture : IDisposable
 
     /// <summary>The mock backend's controller surface.</summary>
     public IMockOwoController MockController => _factory.Services.GetRequiredService<IMockOwoController>();
+
+    /// <summary>
+    /// Bodymap state populated by <c>BackendBootstrapper</c> after the
+    /// validator runs. Exposes <see cref="IBodyMapState.RefusedBackendCount"/>
+    /// (the value the startup banner reads), <see cref="IBodyMapState.PlacementCount"/>,
+    /// and <see cref="IBodyMapState.WarningCount"/>.
+    /// </summary>
+    public IBodyMapState BodyMapState => _factory.Services.GetRequiredService<IBodyMapState>();
 
     /// <summary>
     /// Factory for the in-process SQLite history database, so tests can
