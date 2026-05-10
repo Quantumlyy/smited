@@ -18,6 +18,7 @@ internal static class AdminConfiguration
         services.AddServerSideBlazor();
         services.AddSingleton<PanicCounter>();
         services.AddScoped<EventStreamSubscriber>();
+        services.AddScoped<HistoryQueryService>();
         return services;
     }
 }
