@@ -137,6 +137,65 @@ public class BackendDescriptorValidatorTests
     }
 
     [Fact]
+    public void One_enabled_one_disabled_owo_skin_descriptor_is_allowed()
+    {
+        // Documented workflow: keep disconnected hardware config around
+        // disabled. The disabled descriptor never reaches the factory,
+        // so it doesn't conflict with the enabled descriptor's runtime
+        // singleton state. Validator must allow.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary", Enabled = true },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-spare", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'owo_skin'"));
+    }
+
+    [Fact]
+    public void Two_disabled_owo_skin_descriptors_is_allowed()
+    {
+        // Both entries kept around for documentation / future use,
+        // neither active. Validator must allow.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-a", Enabled = false },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-b", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'owo_skin'"));
+    }
+
+    [Fact]
+    public void One_enabled_one_disabled_mock_owo_descriptor_is_allowed()
+    {
+        // Same workflow as owo_skin; cover both singleton kinds.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-owo", Enabled = true },
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-spare", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'mock_owo'"));
+    }
+
+    [Fact]
+    public void Two_disabled_mock_owo_descriptors_is_allowed()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-a", Enabled = false },
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-b", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'mock_owo'"));
+    }
+
+    [Fact]
     public void Three_owo_skin_descriptors_emit_a_single_error_naming_first_two_indices()
     {
         // 3+ duplicates of the same singleton kind only emit one error
