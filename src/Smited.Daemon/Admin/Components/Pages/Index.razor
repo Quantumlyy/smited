@@ -64,9 +64,28 @@
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        _selfRef?.Dispose();
-        return ValueTask.CompletedTask;
+        if (_selfRef is not null)
+        {
+            // Tell admin.js to clear its module-level reference if it
+            // still points at this component, so a later Esc press
+            // doesn't try to invoke a disposed DotNetObjectReference.
+            // The JS-side guard ignores stale unregister calls.
+            try
+            {
+                await JS.InvokeVoidAsync(
+                    "smitedAdmin.unregisterKeyboardShortcuts",
+                    _selfRef);
+            }
+            catch
+            {
+                // Disposal can race with circuit teardown; the JS
+                // call may fail because the connection is already
+                // gone. Nothing to do — the new component (if any)
+                // will overwrite the slot via registerKeyboardShortcuts.
+            }
+            _selfRef.Dispose();
+        }
     }
 }
