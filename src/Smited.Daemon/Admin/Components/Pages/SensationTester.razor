@@ -36,7 +36,7 @@
             <summary style="cursor:pointer;color:var(--muted)">Overrides</summary>
             <div style="display:flex;gap:1rem;margin-top:0.5rem">
                 <label>
-                    Intensity scale (%): <input type="number" min="0" max="200" step="1" @bind="_intensityScalePct" style="width:5rem" />
+                    Intensity scale (%): <input type="number" min="0" max="100" step="1" @bind="_intensityScalePct" style="width:5rem" />
                 </label>
                 <label>
                     Priority: <input type="number" @bind="_priority" style="width:4rem" />
@@ -90,14 +90,12 @@
         if (string.IsNullOrEmpty(_selectedBackendId) || string.IsNullOrEmpty(_selectedSensationName))
             return;
 
-        var input = new ResolvedTriggerInput(
-            BackendId: _selectedBackendId,
-            SensationName: _selectedSensationName,
-            InlineMicrosensations: null,
-            ZoneIds: Array.Empty<string>(),
-            IntensityScale: _intensityScalePct,
-            Priority: _priority,
-            ClientTraceId: string.IsNullOrEmpty(_traceId) ? Guid.NewGuid().ToString("n") : _traceId);
+        var input = BuildInput(
+            backendId: _selectedBackendId,
+            sensationName: _selectedSensationName,
+            intensityScalePct: _intensityScalePct,
+            priority: _priority,
+            traceId: _traceId);
 
         try
         {
@@ -122,6 +120,30 @@
         // value unless the user typed one in.
         _traceId = Guid.NewGuid().ToString("n");
     }
+
+    /// <summary>
+    /// Builds the <see cref="ResolvedTriggerInput"/> the FIRE button hands
+    /// to <see cref="TriggerCoordinator"/>. Pure (no component state, no
+    /// DI) so it is unit-testable; clamps <paramref name="intensityScalePct"/>
+    /// to the wire contract's 0..100 range. Out-of-process clients can't
+    /// send values &gt;100 (protovalidate rejects them); the admin UI must
+    /// not either, or its results aren't reproducible via gRPC and may
+    /// exceed a user's calibration ceiling on real hardware.
+    /// </summary>
+    internal static ResolvedTriggerInput BuildInput(
+        string backendId,
+        string sensationName,
+        uint intensityScalePct,
+        int priority,
+        string? traceId) =>
+        new(
+            BackendId: backendId,
+            SensationName: sensationName,
+            InlineMicrosensations: null,
+            ZoneIds: Array.Empty<string>(),
+            IntensityScale: Math.Clamp(intensityScalePct, 0u, 100u),
+            Priority: priority,
+            ClientTraceId: string.IsNullOrEmpty(traceId) ? Guid.NewGuid().ToString("n") : traceId);
 
     private sealed record FireResult(bool Accepted, string Text);
 }
