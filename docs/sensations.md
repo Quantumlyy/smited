@@ -10,7 +10,7 @@ perceived intensity:
 | 3 | `compile_error_mild`   | Single warning                   | left pectoral  | 55 Hz        | 65%       |
 | 4 | `chat_zap`             | High-priority mention / DM       | left arm       | 95 Hz (sharp)| 70%       |
 | 5 | `test_failed`          | Test went red                    | abdomen (both) | 75 Hz        | 75%       |
-| 6 | `compile_error_severe` | Multiple errors / broken build   | both pectorals | 100 Hz (sharp)| 90%      |
+| 6 | `compile_error_severe` | Multiple errors / broken build   | both pectorals | 100 Hz (sharp) | 90%      |
 
 ## Zone conventions
 
