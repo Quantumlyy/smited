@@ -300,16 +300,33 @@ public sealed class OwoBackend : IHapticBackend
             // The SDK's connect handshake didn't complete within the
             // deadline. Daemon startup must continue so other backends,
             // the gRPC listener, and the admin UI come up. The heartbeat
-            // loop (started below) keeps polling IsConnected; if MyOWO /
-            // the OWO Visualizer accepts the game later, status flips to
+            // loop (started below) polls IsConnected; if MyOWO / the OWO
+            // Visualizer accepts the game later, the next tick observes
+            // a Disconnected -> Ready transition and flips Status to
             // Ready automatically without a daemon restart.
+            //
+            // The heartbeat poll alone isn't enough though: it only
+            // calls TryReconnectAsync on a Disconnected -> Ready
+            // transition, which never fires when the initial connect
+            // itself never completed (_lastSeenConnected stayed false
+            // and IsConnected stays false). Without an active retry,
+            // a permanently-stuck SDK leaves the backend disconnected
+            // until daemon restart - contradicting the warning text
+            // above and the docs. Kick off TryReconnectAsync explicitly
+            // so each attempt issues a fresh connect call (with its own
+            // backoff) and the heartbeat-driven status flip can occur
+            // when the SDK's connect eventually succeeds.
             Status = BackendStatus.Disconnected;
             _logger.LogWarning(
-                "OWO backend {Id} did not connect within {Seconds}s; daemon will continue and the heartbeat loop will keep retrying. "
+                "OWO backend {Id} did not connect within {Seconds}s; daemon will continue and reconnect attempts will keep retrying in the background. "
               + "Common causes: OWO Visualizer or MyOWO not running, the app did not accept the game in 'Scan Games', "
               + "network/firewall blocking the broadcast, or a wrong project ID / .owoauth file.",
                 Id, _options.ConnectTimeoutSeconds);
             StartHeartbeat();
+            if (_options.MaxReconnectAttempts > 0)
+            {
+                _ = TryReconnectAsync(_lifetimeCts!.Token);
+            }
             return;
         }
         catch (OperationCanceledException)
@@ -427,6 +444,15 @@ public sealed class OwoBackend : IHapticBackend
 
     private async Task TryReconnectAsync(CancellationToken ct)
     {
+        // Bound each per-attempt connect call by the same deadline that
+        // the initial ConnectAsync uses. Without this, a permanently-
+        // stuck SDK leaves the very first reconnect attempt hanging on
+        // its WaitAsync and we never reach the next iteration of the
+        // backoff loop — defeating the point of MaxReconnectAttempts.
+        var deadline = _options.ConnectTimeoutSeconds > 0
+            ? TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds)
+            : Timeout.InfiniteTimeSpan;
+
         for (var attempt = 1; attempt <= _options.MaxReconnectAttempts; attempt++)
         {
             try
@@ -434,13 +460,17 @@ public sealed class OwoBackend : IHapticBackend
                 var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                 await Task.Delay(backoff, _time, ct).ConfigureAwait(false);
 
-                if (!string.IsNullOrEmpty(_options.ManualIp))
+                Task connectTask = !string.IsNullOrEmpty(_options.ManualIp)
+                    ? _sdk.ConnectAsync(_options.ManualIp)
+                    : _sdk.AutoConnectAsync();
+
+                if (deadline == Timeout.InfiniteTimeSpan)
                 {
-                    await _sdk.ConnectAsync(_options.ManualIp).WaitAsync(ct).ConfigureAwait(false);
+                    await connectTask.WaitAsync(ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    await _sdk.AutoConnectAsync().WaitAsync(ct).ConfigureAwait(false);
+                    await connectTask.WaitAsync(deadline, ct).ConfigureAwait(false);
                 }
 
                 if (_sdk.IsConnected)
@@ -452,6 +482,15 @@ public sealed class OwoBackend : IHapticBackend
                     // BackendLifecycleEvent itself; nothing to do here.
                     return;
                 }
+            }
+            catch (TimeoutException)
+            {
+                // This attempt's connect didn't finish within the
+                // deadline. Fall through to the next iteration's
+                // backoff so a hung SDK still exhausts attempts.
+                _logger.LogDebug(
+                    "OWO backend {Id} reconnect attempt {Attempt} timed out after {Seconds}s",
+                    Id, attempt, _options.ConnectTimeoutSeconds);
             }
             catch (OperationCanceledException)
             {
