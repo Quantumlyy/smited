@@ -6,6 +6,17 @@
     <AssemblyName>Smited.Daemon.Owo</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      Library projects don't copy NuGet runtime assemblies into bin/
+      by default — that only happens at publish time. The daemon loads
+      this assembly reflectively, so it doesn't trigger a publish step
+      itself; if OWO.dll isn't next to Smited.Daemon.Owo.dll the SDK
+      call fails at runtime. CopyLocalLockFileAssemblies forces the
+      build to lay out every transitive runtime dependency next to the
+      project's primary output, which the daemon's csproj then mirrors
+      into its own bin folder via the CopyOwoBackendOutput target.
+    -->
+    <CopyLocalLockFileAssemblies Condition="'$(OS)' == 'Windows_NT'">true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <!--

@@ -61,21 +61,45 @@
   -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <ProjectReference Include="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <OutputItemType>Content</OutputItemType>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PrivateAssets>all</PrivateAssets>
       <!--
-        SkipGetTargetFrameworkProperties=true bypasses the TFM
-        compatibility check between net9.0 (this project) and
-        net9.0-windows (the OWO project). It's safe here because
-        ReferenceOutputAssembly=false already means the daemon's
-        compile graph doesn't see OWO's types — only its built DLL,
-        copied as content.
+        ReferenceOutputAssembly=false keeps OWO's types out of the
+        daemon's compile graph (BackendBootstrapper loads them
+        reflectively). SkipGetTargetFrameworkProperties=true bypasses
+        the TFM compatibility check between net9.0 here and
+        net9.0-windows there. Output copying is handled by the
+        CopyOwoBackendRuntime target below — Content/CopyToOutput on
+        the ProjectReference would only carry the project's primary
+        DLL, missing the OWO NuGet runtime assembly.
       -->
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+      <Private>false</Private>
     </ProjectReference>
   </ItemGroup>
+
+  <!--
+    Copy the OWO backend's full bin folder next to the daemon binary so
+    the reflective Type.GetType("Smited.Daemon.Owo.OwoBackend, ...")
+    finds the assembly AND its OWO SDK runtime dependency
+    (OWO.dll). The OWO project sets CopyLocalLockFileAssemblies so its
+    own bin folder is the source of truth. Files that already exist in
+    the daemon's output (Smited.Daemon.Abstractions.dll, Google.Protobuf,
+    etc.) are skipped so we don't risk version drift between two
+    compilation contexts of the same dependency.
+  -->
+  <Target Name="CopyOwoBackendRuntime"
+          AfterTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT'">
+    <ItemGroup>
+      <_OwoSourceFiles Include="..\Smited.Daemon.Owo\bin\$(Configuration)\net9.0-windows\*.dll" />
+      <_OwoSourceFiles Include="..\Smited.Daemon.Owo\bin\$(Configuration)\net9.0-windows\*.pdb" />
+      <_OwoNewFiles Include="@(_OwoSourceFiles)"
+                    Condition="!Exists('$(OutDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_OwoNewFiles)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <ItemGroup>
     <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
