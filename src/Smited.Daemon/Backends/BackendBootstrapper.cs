@@ -247,10 +247,21 @@ internal sealed class BackendBootstrapper : IHostedService
             _logger.LogWarning("Bodymap overlap: {Message}", warning.Message);
         }
 
+        // PlacementCount drives the banner's "N placements" line and
+        // its "Not configured (warnings off)" zero-state. The user-
+        // facing "placement" is the validator-considered placement,
+        // not the raw config-shape placement: a config containing
+        // only BodyRegion.Unspecified placeholders is documented as
+        // inert (every check is a no-op), and reporting "1 placements"
+        // for that case would contradict the inert behavior. Match
+        // the banner number to what the body map actually enforces.
+        var consideredCount = bodyMap.Placements.Count(
+            p => p.Region != BodyRegion.Unspecified);
+
         _bodyMapState.Initialize(
             result,
             bodyMap.OverlapPolicy,
-            placementCount: bodyMap.Placements.Count);
+            placementCount: consideredCount);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

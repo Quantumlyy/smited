@@ -179,6 +179,64 @@ public class BackendBootstrapperBodyMapTests
         sys.BodyMapState.WarningCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task Unspecified_placeholder_does_not_count_toward_PlacementCount()
+    {
+        // BodyRegion.Unspecified is documented as "not part of the
+        // body map" — the validator drops Unspecified placements
+        // entirely. The banner's "N placements" reading must agree:
+        // a config containing only Unspecified placeholders should
+        // render "Not configured (warnings off)", not "1 placements"
+        // (which would imply the placement is being enforced).
+        var bodyMap = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "harness",
+                    ZoneIds = { "z" },
+                    Region = BodyRegion.Unspecified,
+                },
+            },
+        };
+
+        await using var sys = await Build(bodyMap);
+
+        sys.Registry.Count.Should().Be(1);
+        sys.BodyMapState.PlacementCount.Should().Be(0);
+        sys.BodyMapState.WarningCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PlacementCount_reflects_only_non_Unspecified_placements()
+    {
+        // Mixed config: one real placement and one Unspecified
+        // placeholder. The banner should show 1, not 2.
+        var bodyMap = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "harness",
+                    ZoneIds = { "z" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+                new Placement
+                {
+                    BackendId = "harness",
+                    ZoneIds = { "z" },
+                    Region = BodyRegion.Unspecified,
+                },
+            },
+        };
+
+        await using var sys = await Build(bodyMap);
+
+        sys.BodyMapState.PlacementCount.Should().Be(1);
+    }
+
     private static async Task<TestSystem> Build(
         BodyMapOptions bodyMap,
         BodyRegion? manufacturerForbidden = null,
