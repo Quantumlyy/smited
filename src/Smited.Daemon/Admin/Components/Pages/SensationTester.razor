@@ -5,8 +5,9 @@
 
 @*  Sensation tester. Pick backend → pick sensation → FIRE. Result line
     shows accepted=true/false plus error info on rejection. Constructs
-    ResolvedTriggerInput in-process and calls TriggerCoordinator.TriggerAsync
-    directly (mirrors what SmitedGrpcService does via ProtoMappers).  *@
+    ResolvedTriggerInput in-process and dispatches through
+    SmitedActionService so the admin path produces the same history
+    rows the gRPC path does.  *@
 
 <section class="card">
     <h2>Sensation tester</h2>
@@ -36,7 +37,7 @@
             <summary style="cursor:pointer;color:var(--muted)">Overrides</summary>
             <div style="display:flex;gap:1rem;margin-top:0.5rem">
                 <label>
-                    Intensity scale (%): <input type="number" min="0" max="100" step="1" @bind="_intensityScalePct" style="width:5rem" />
+                    Intensity scale (%): <input type="number" min="0" max="100" step="1" placeholder="default" @bind="_intensityScalePct" style="width:5rem" />
                 </label>
                 <label>
                     Priority: <input type="number" @bind="_priority" style="width:4rem" />
@@ -59,7 +60,11 @@
 @code {
     private string? _selectedBackendId;
     private string? _selectedSensationName;
-    private uint _intensityScalePct = 100;
+    // Nullable: null means "no override; coordinator applies the
+    // sensation's authored default_intensity". Eager-defaulting to a
+    // plausible-looking 100 erased the distinction between "no
+    // override" and "override to max" — see Round-N+2 fix #1.
+    private uint? _intensityScalePct;
     private int _priority;
     private string _traceId = Guid.NewGuid().ToString("n");
     private IReadOnlyList<RegisteredSensation> _sensations = Array.Empty<RegisteredSensation>();
@@ -123,17 +128,22 @@
 
     /// <summary>
     /// Builds the <see cref="ResolvedTriggerInput"/> the FIRE button hands
-    /// to <see cref="TriggerCoordinator"/>. Pure (no component state, no
-    /// DI) so it is unit-testable; clamps <paramref name="intensityScalePct"/>
-    /// to the wire contract's 0..100 range. Out-of-process clients can't
-    /// send values &gt;100 (protovalidate rejects them); the admin UI must
-    /// not either, or its results aren't reproducible via gRPC and may
-    /// exceed a user's calibration ceiling on real hardware.
+    /// to <see cref="SmitedActionService"/>. Pure (no component state, no
+    /// DI) so it is unit-testable.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="intensityScalePct"/> is nullable: <c>null</c> means
+    /// "no override; coordinator applies the sensation's authored
+    /// default_intensity." When the user supplies a value, it is clamped
+    /// to the wire contract's 0..100 range. Out-of-process clients can't
+    /// send values &gt;100 (protovalidate rejects them); the admin UI
+    /// must not either, or its results aren't reproducible via gRPC and
+    /// may exceed a user's calibration ceiling on real hardware.
+    /// </remarks>
     internal static ResolvedTriggerInput BuildInput(
         string backendId,
         string sensationName,
-        uint intensityScalePct,
+        uint? intensityScalePct,
         int priority,
         string? traceId) =>
         new(
@@ -141,7 +151,7 @@
             SensationName: sensationName,
             InlineMicrosensations: null,
             ZoneIds: Array.Empty<string>(),
-            IntensityScale: Math.Clamp(intensityScalePct, 0u, 100u),
+            IntensityScale: intensityScalePct is uint v ? Math.Clamp(v, 0u, 100u) : (uint?)null,
             Priority: priority,
             ClientTraceId: string.IsNullOrEmpty(traceId) ? Guid.NewGuid().ToString("n") : traceId);
 
