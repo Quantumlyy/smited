@@ -104,6 +104,8 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:EnableReflection` | `true` | grpcurl-friendly |
 | `Smited:Backends:EnableMockOwo` | `true` | Always-on mock for development |
 | `Smited:Backends:EnableOwo` | `false` | Real OWO; Windows-only |
+| `Smited:Backends:EnableMockBhaptics` | `false` | TactSuit X40 mock for development |
+| `Smited:Backends:EnableBhaptics` | `false` | Real bHaptics; Windows-only; requires bHaptics Player running |
 | `Smited:Sensations:LibraryRoot` | `./sensations` | Resolved relative to the binary |
 | `Smited:EventBus:BufferCapacity` | `1024` | Per-subscriber channel capacity |
 | `Smited:EventBus:SlowSubscriberPolicy` | `drop_oldest` | Channel `FullMode` for slow consumers |
@@ -112,3 +114,5 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:History:CustomPath` | _unset_ | Override the SQLite path |
 
 History is daemon-internal — see [`docs/history.md`](history.md) for the schema and example queries.
+
+The real bHaptics backend talks to a locally-running bHaptics Player over its WebSocket endpoint (default `ws://localhost:15881/v2/feedbacks`). Player must be running on the same Windows machine as the daemon and paired with at least one device before `EnableBhaptics` is meaningful.

@@ -43,8 +43,11 @@ The daemon is a thin layer between gRPC clients and pluggable haptic backends. E
               │   ┌─────────────────────────────────────────┐
               │   │           IHapticBackend                │
               │   │ ─────────────────────────────────────── │
-              │   │  MockOwoBackend │ OwoBackend (Windows,  │
-              │   │                 │  reflectively loaded) │
+              │   │  MockOwoBackend       │ OwoBackend      │
+              │   │  MockBhapticsBackend  │ BhapticsBackend │
+              │   │   (in-process mocks)  │ (Windows-only,  │
+              │   │                       │ reflectively    │
+              │   │                       │ loaded)         │
               │   └─────────────────────────────────────────┘
               │              │
               │              │ backend.Events  (per-backend cold stream)
@@ -71,6 +74,8 @@ The daemon is a thin layer between gRPC clients and pluggable haptic backends. E
 `IHapticBackend` is the central abstraction. Every backend implements it. Static descriptors (zones, parameter schema, concurrency model, calibration, extras) reuse generated proto types directly because they round-trip 1:1 to the wire. Triggering and lifecycle flows use **internal records** (`BackendTriggerRequest`, `BackendTriggerResult`, `BackendStopRequest`, `BackendEvent` hierarchy) so backends aren't coupled to wire details.
 
 `BackendRegistry` is `internal` — nothing outside the daemon should hold a registry reference; tests reach it via `InternalsVisibleTo`. Register and deregister publish a `BackendLifecycleEvent` through `IBackendEventSink`, which `EventBus` implements.
+
+**Backend heterogeneity.** OWO and bHaptics differ on every meaningful axis: TENS vs vibration motors, exclusive `CANCEL_OLDEST` (max 1) vs motor-summing `PRIORITY` (max 4), per-user calibration vs Player-slider intensity, 10 zones vs 40+ vest motors plus optional accessories. The schema accommodates both because every descriptor (`ZoneTopology`, `ParameterSchema`, `ConcurrencyModel`, `CalibrationState`) is per-backend and discovered at runtime — clients never assume a body of zone names or a single concurrency policy. Adding a third family with different semantics again should be the same shape: pick a `Kind`, fill in the descriptors, ship.
 
 ### Trigger coordinator (`Triggering/`)
 
@@ -105,7 +110,7 @@ JSON files under `LibraryRoot/<backend_kind>/*.json` are loaded at boot by `Sens
 
 ## Cross-platform conditional compilation
 
-`Smited.Daemon.Owo.csproj` targets `net9.0-windows`. Its OWO NuGet package and `OwoBackend.cs` source are guarded by `'$(OS)' == 'Windows_NT'` conditions so the project compiles to an empty assembly on Mac/Linux. The daemon project's reverse `ProjectReference` to it is Windows-only and uses `ReferenceOutputAssembly=false` so the compile-time graph stays acyclic — `BackendBootstrapper` loads `OwoBackend` via `Type.GetType("Smited.Daemon.Owo.OwoBackend, Smited.Daemon.Owo")` at runtime when the daemon is on Windows AND `Smited:Backends:EnableOwo` is true.
+`Smited.Daemon.Owo.csproj` and `Smited.Daemon.Bhaptics.csproj` both target `net9.0-windows`. Their platform-conditional `.cs` source and any Windows-only `PackageReference` entries are guarded by `'$(OS)' == 'Windows_NT'` conditions so the projects compile to empty (or BCL-only) assemblies on Mac/Linux. The daemon project's reverse `ProjectReference` to each is Windows-only and uses `ReferenceOutputAssembly=false` so the compile-time graph stays acyclic — `BackendBootstrapper` loads each platform backend via `Type.GetType` reflection at runtime when the daemon is on Windows AND the corresponding `EnableOwo` / `EnableBhaptics` flag is true.
 
 ## Things explicitly out of scope
 

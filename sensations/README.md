@@ -79,3 +79,20 @@ A failing file aborts the daemon's start; fix it and restart.
    ```
 
 Runtime registration via `RegisterSensation` is also supported by backends advertising the `sensation_registry_mutable` capability — check `DescribeBackend` to confirm. Runtime-registered files are written with `scope: "id"` and `backend_id` so they reload only for the backend that accepted the registration.
+
+## Per-backend authoring notes
+
+The two shipping backends interpret parameters differently. Author files in `sensations/<backend_kind>/` matching the kind you target — the loader binds the file to every registered backend whose `Kind` matches.
+
+### OWO Skin (`sensations/owo_skin/`)
+
+- TENS / EMS-based stimulation. `intensity` is a percentage of the user's calibrated pain threshold, not a raw amplitude — the same value will feel different across users. Sensations should advertise an `estimated_duration` that includes any `ramp_up`/`ramp_down`/`exit_delay` so the daemon's concurrency slot stays held for the right wall-clock window.
+- Concurrency is exclusive — `CONCURRENCY_POLICY_CANCEL_OLDEST` with `max_concurrent = 1`. A new trigger preempts the active sensation; chained pulses must live inside one sensation's `microsensations` array, not as separate triggers.
+- Required parameters per microsensation: `frequency` (Hz), `intensity` (%), `duration`. Optional envelope shapers: `ramp_up`, `ramp_down`, `exit_delay`.
+
+### bHaptics TactSuit (`sensations/bhaptics_tactsuit/`)
+
+- Vibration motors. `intensity` (0–100) maps directly to per-motor PWM, modulated by the bHaptics Player app's global slider — there's no per-user calibration step. Motors physically sum on the device, so concurrent sensations can stack.
+- Concurrency is `CONCURRENCY_POLICY_PRIORITY` with `max_concurrent = 4`. Higher-priority triggers preempt lower-priority ones; equal-priority within capacity stack normally.
+- Required parameters per microsensation: `intensity` (%), `duration`. Optional `frequency` (50–200 Hz) targets TactSuit X-series motors only — older devices ignore it but the schema honours it.
+- Zone groups follow the canonical bHaptics layout: `front` and `back` cover the 20 motors of each vest half; `front_chest` and `back_shoulders` are the top rows; `torso` is both halves; `all` is every registered motor (and grows when accessories are attached). Front and back zones use distinct `Frame` labels (`body_front` / `body_back`) so cross-backend clients can tell which side of the body they target.

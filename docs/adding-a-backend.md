@@ -2,6 +2,15 @@
 
 Every backend implements `IHapticBackend` (in `src/Smited.Daemon/Backends/`). The daemon doesn't care about the underlying transport — BLE, USB-HID, OSC, a virtual loopback — only that the backend exposes its capabilities through the interface and pushes lifecycle events through its `IAsyncEnumerable<BackendEvent>`.
 
+## Backend taxonomy
+
+Two hardware families ship in-tree. They differ on every meaningful axis, which is the whole point of the abstraction: if a backend that's this dissimilar fits the schema cleanly, the schema is defensible.
+
+- **OWO Skin** — `Kind = "owo_skin"`. EMS / TENS-based stimulation. 10 zones (pectoral / abdominal / lumbar / dorsal pairs plus left/right arm). Exclusive concurrency: `CONCURRENCY_POLICY_CANCEL_OLDEST`, `max_concurrent = 1`. Per-user calibration captured as a percentage of the user's pain threshold; advertises the `calibrated` capability tag. Real backend lives in `Smited.Daemon.Owo` (Windows-only); the Mac-runnable mock is `MockOwoBackend`.
+- **bHaptics TactSuit** — `Kind = "bhaptics_tactsuit"`. Vibration-motor haptics. 40 vest zones (front/back halves on a 4×5 grid), with optional 12 glove + 8 forearm motors. Concurrent: `CONCURRENCY_POLICY_PRIORITY`, `max_concurrent = 4` (motors physically sum on hardware; the cap prevents runaway haptic stacking). No per-user calibration — intensity is tuned via the bHaptics Player app's global slider. Real backend lives in `Smited.Daemon.Bhaptics` (Windows-only, speaks the local Player WebSocket); the Mac-runnable mock is `MockBhapticsBackend`.
+
+When weighing a new backend, ask whether it fits one of these `Kind` values cleanly. If the device shape is genuinely different (different transport, different calibration semantics, different concurrency model), it's its own family — pick a new `Kind` and a new directory under `sensations/<your_kind>/`.
+
 ## Walkthrough
 
 ### 1. Pick where the backend lives

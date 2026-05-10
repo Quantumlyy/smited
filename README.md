@@ -1,6 +1,6 @@
 # smited
 
-A daemon that fronts haptic hardware behind a single gRPC interface. Backends register at runtime and advertise their own zones, parameter schemas, concurrency models, and calibration state, so clients discover capabilities and dispatch accordingly without hardcoding hardware-specific knowledge. The first real backend is the OWO Skin haptic vest; this MVP ships with a faithful `MockOwoBackend` so the gRPC surface, event streaming, and concurrency model can be exercised on Mac without hardware.
+A daemon that fronts haptic hardware behind a single gRPC interface. Backends register at runtime and advertise their own zones, parameter schemas, concurrency models, and calibration state, so clients discover capabilities and dispatch accordingly without hardcoding hardware-specific knowledge. Backends include the OWO Skin haptic vest and the bHaptics TactSuit family (X40, X16, Air, plus optional TactGloves and TactSleeves); this MVP ships faithful `MockOwoBackend` and `MockBhapticsBackend` simulations so the gRPC surface, event streaming, and concurrency model can be exercised on Mac without hardware.
 
 ## Quickstart (macOS / Linux)
 
