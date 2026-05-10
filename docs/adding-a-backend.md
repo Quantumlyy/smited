@@ -85,13 +85,13 @@ If the backend should accept runtime registrations via the `RegisterSensation` R
 
 ## Platform-conditional backends (Windows-only example)
 
-Mirror the `Smited.Daemon.Owo` pattern:
+`Smited.Daemon.Owo` is the reference implementation — see [`docs/owo.md`](owo.md) for the user-facing setup, runbook, and TENS safety notes the OWO backend ships with. The structural pattern:
 
 1. **`src/Smited.Daemon.<Platform>/<Platform>Backend.csproj`** — `<TargetFramework>net9.0-windows</TargetFramework>` (or whatever TFM). The `<PropertyGroup>` is **unconditional** — conditioning it produces an empty `TargetFramework` on the wrong platform and breaks the build.
 2. The platform's NuGet package goes in a conditional `<ItemGroup Condition="'$(OS)' == 'Windows_NT'">`.
-3. `<Compile Remove="<Platform>Backend.cs" />` in a non-platform `<ItemGroup>` so the project compiles to an empty assembly off-platform.
-4. The platform project references the daemon project (so it can see `IHapticBackend`).
-5. The daemon project's reverse `ProjectReference` is conditional and uses `<ReferenceOutputAssembly>false</ReferenceOutputAssembly>` so the build graph stays acyclic. Daemon source never imports the backend type — `BackendBootstrapper` loads it via `Type.GetType("Smited.Daemon.<Platform>.<Platform>Backend, Smited.Daemon.<Platform>")` at runtime.
+3. `<Compile Remove>` every SDK-touching `.cs` file in a non-platform `<ItemGroup>` so the project compiles to an empty assembly off-platform. Cross-platform helpers (records, options, interfaces with primitive-only signatures) can stay shared.
+4. The platform project references `Smited.Daemon.Abstractions` (so it can see `IHapticBackend` and any cross-platform helper types like `OwoBackendOptions`/`IOwoSdk`).
+5. The daemon project's reverse `ProjectReference` is conditional and uses `<ReferenceOutputAssembly>false</ReferenceOutputAssembly>` so the build graph stays acyclic. Daemon source never imports the backend type — `BackendBootstrapper` loads it via `Type.GetType("Smited.Daemon.<Platform>.<Platform>Backend, Smited.Daemon.<Platform>")` at runtime. Auxiliary singletons the backend depends on (e.g. an `IOwoSdk` impl) follow the same reflective-registration pattern in `Program.cs`.
 
 ## Tests
 

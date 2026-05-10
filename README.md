@@ -52,12 +52,13 @@ See [`docs/building.md`](docs/building.md) for the full Cake target list.
 - [`docs/building.md`](docs/building.md) — Cake build script, publish targets, why Cake.
 - [`docs/grpcurl-cheatsheet.md`](docs/grpcurl-cheatsheet.md) — example grpcurl invocations for every RPC.
 - [`docs/adding-a-backend.md`](docs/adding-a-backend.md) — how to add a new `IHapticBackend` implementation.
+- [`docs/owo.md`](docs/owo.md) — Windows OWO Skin setup, calibration, smoke-test runbook, TENS safety notes.
 - [`docs/history.md`](docs/history.md) — the daemon's SQLite history database: tables, queries, retention.
 - [`sensations/README.md`](sensations/README.md) — sensation file format reference.
 
 ## Status
 
-This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, and the boot-time sensation library. The Windows OWO driver lives in `src/Smited.Daemon.Owo/` as a stub that throws `NotImplementedException` from every member; wiring it to the real OWO SDK is a separate Windows finishing pass. The daemon is LAN/localhost only — no TLS, no auth.
+This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, and the boot-time sensation library. The Windows OWO Skin backend in `src/Smited.Daemon.Owo/` is wired against the official OWO C# SDK — see [`docs/owo.md`](docs/owo.md) for setup, the smoke-test runbook, and TENS safety notes. The daemon is LAN/localhost only — no TLS, no auth.
 
 ## License
 
