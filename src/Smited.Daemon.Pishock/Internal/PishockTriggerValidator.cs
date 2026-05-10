@@ -23,12 +23,13 @@ internal static class PishockTriggerValidator
         ArgumentNullException.ThrowIfNull(options);
 
         var op = MicrosensationReader.ReadOp(micro);
-        if (!options.AllowedOps.Contains(op))
+        var allowed = options.EffectiveAllowedOps;
+        if (!allowed.Contains(op))
         {
             throw new BackendTriggerRejectedException(
                 TriggerErrorCode.InvalidParameter,
                 $"op '{op}' is not in this descriptor's AllowedOps "
-                + $"({string.Join(", ", options.AllowedOps)})",
+                + $"({string.Join(", ", allowed)})",
                 $"microsensations[{index}].parameters.op");
         }
 

@@ -53,11 +53,15 @@ public sealed class MockPishockBackendFactory : IBackendFactory
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(options);
 
-        if (options.AllowedOps is null || options.AllowedOps.Count == 0)
+        // Distinguish null (user didn't set AllowedOps; use defaults) from
+        // explicit empty []. An empty list is misconfiguration — a
+        // shocker that can't do anything is never what the user meant.
+        if (options.AllowedOps is { Count: 0 })
         {
             throw new BackendConfigurationException(descriptor.Id, descriptor.Kind,
                 "AllowedOps must contain at least one operation. A PiShock descriptor with no "
-                + "allowed ops cannot fire anything; either remove the descriptor or include "
+                + "allowed ops cannot fire anything; either remove the descriptor, omit "
+                + "AllowedOps to take the default [Vibrate, Beep], or include at least one of "
                 + "Vibrate, Beep, or Shock.");
         }
 

@@ -58,9 +58,9 @@ public sealed class PishockBackend : IHapticBackend
         _logger = logger;
 
         DisplayName = !string.IsNullOrEmpty(options.DisplayName) ? options.DisplayName : id;
-        Capabilities = PishockDescriptors.BuildCapabilities(options.AllowedOps);
+        Capabilities = PishockDescriptors.BuildCapabilities(options.EffectiveAllowedOps);
         Zones = PishockDescriptors.BuildZones();
-        Parameters = PishockDescriptors.BuildParameters(options.AllowedOps);
+        Parameters = PishockDescriptors.BuildParameters(options.EffectiveAllowedOps);
         Concurrency = new ConcurrencyModel
         {
             MaxConcurrent = 1,

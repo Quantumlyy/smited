@@ -50,11 +50,24 @@ public sealed class PishockBackendOptions
     /// <c>INVALID_PARAMETER</c> at trigger time. The default list excludes
     /// <see cref="PishockOp.Shock"/> — users opt in by adding it.
     /// </summary>
-    public List<PishockOp> AllowedOps { get; set; } = new()
-    {
-        PishockOp.Vibrate,
-        PishockOp.Beep,
-    };
+    /// <remarks>
+    /// Nullable on purpose. .NET's configuration binder for
+    /// <see cref="List{T}"/> appends bound items to the existing list
+    /// rather than replacing it; with a non-null default,
+    /// <c>AllowedOps: ["Shock"]</c> in config produces
+    /// <c>[Vibrate, Beep, Shock]</c> and the user can't actually narrow
+    /// the allow-list. Defaulting to <c>null</c> lets the binder
+    /// allocate a fresh list, and <see cref="EffectiveAllowedOps"/>
+    /// applies the default-on-null fallback at read time.
+    /// </remarks>
+    public List<PishockOp>? AllowedOps { get; set; }
+
+    /// <summary>Default-on-null view of <see cref="AllowedOps"/>: Vibrate and Beep.</summary>
+    public IReadOnlyList<PishockOp> EffectiveAllowedOps =>
+        AllowedOps ?? DefaultAllowedOps;
+
+    internal static readonly IReadOnlyList<PishockOp> DefaultAllowedOps =
+        new[] { PishockOp.Vibrate, PishockOp.Beep };
 
     /// <summary>
     /// Hard ceiling on shock intensity (0..100) regardless of what the

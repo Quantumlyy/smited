@@ -175,6 +175,69 @@ public class MockPishockBackendFactoryTests
     }
 
     [Fact]
+    public void TryCreate_with_AllowedOps_in_config_replaces_defaults_does_not_append()
+    {
+        // .NET's IConfiguration.Bind for List<T> APPENDS to the existing
+        // list rather than replacing it. If PishockBackendOptions.AllowedOps
+        // ships with a non-null default, configuring AllowedOps: ["Shock"]
+        // produces [Vibrate, Beep, Shock] — defaults silently stay enabled
+        // and the user can't actually narrow the allow-list. The fix is to
+        // default the list to null and apply defaults after binding.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Options:AllowedOps:0"] = "Shock",
+            })
+            .Build();
+        var section = config.GetSection("Options");
+        var services = new ServiceCollection()
+            .AddSingleton<TimeProvider>(new FakeTimeProvider(
+                new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero)))
+            .AddLogging()
+            .BuildServiceProvider();
+        var factory = new MockPishockBackendFactory();
+        var descriptor = new BackendDescriptor
+        {
+            Kind = "mock_pishock",
+            Id = "shock-only",
+        };
+
+        var backend = factory.TryCreate(descriptor, section, services, NullLogger.Instance);
+
+        // Capabilities reflect the actual AllowedOps. If the binder
+        // appended, "vibrate" and "beep" would still be there.
+        backend!.Capabilities.Should().Contain("shock");
+        backend.Capabilities.Should().NotContain("vibrate");
+        backend.Capabilities.Should().NotContain("beep");
+    }
+
+    [Fact]
+    public void TryCreate_with_no_AllowedOps_in_config_uses_default_vibrate_and_beep()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+        var section = config.GetSection("Options");
+        var services = new ServiceCollection()
+            .AddSingleton<TimeProvider>(new FakeTimeProvider(
+                new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero)))
+            .AddLogging()
+            .BuildServiceProvider();
+        var factory = new MockPishockBackendFactory();
+        var descriptor = new BackendDescriptor
+        {
+            Kind = "mock_pishock",
+            Id = "defaults",
+        };
+
+        var backend = factory.TryCreate(descriptor, section, services, NullLogger.Instance);
+
+        backend!.Capabilities.Should().Contain("vibrate");
+        backend.Capabilities.Should().Contain("beep");
+        backend.Capabilities.Should().NotContain("shock");
+    }
+
+    [Fact]
     public void TryCreate_returns_distinct_instances_for_distinct_descriptors()
     {
         // Multi-instance is the headline difference from MockOwoBackend
