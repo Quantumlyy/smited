@@ -85,7 +85,7 @@ public class TriggerCoordinatorOverlapTests
         registry.Register(backend);
 
         var coordinator = new TriggerCoordinator(
-            registry, library, concurrency, bodyMap, time,
+            registry, library, concurrency, bodyMap, new BreakerService(time), time,
             NullLogger<TriggerCoordinator>.Instance);
 
         return new System(coordinator);
