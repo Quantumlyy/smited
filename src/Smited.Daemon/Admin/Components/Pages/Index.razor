@@ -1,7 +1,35 @@
 @page "/"
-@*  smited admin — single-page smoke-test surface. Components added in
-    subsequent commits (A2 wires Header / BackendCard / SensationTester /
-    PanicButton; A3 wires RecentTriggers).  *@
+@inject BackendRegistry Registry
 
-<h1>smited admin</h1>
-<p>v1 placeholder. Components land in subsequent commits.</p>
+@*  smited admin — single page. Sections top-to-bottom:
+      1. Header (status / uptime / ports)
+      2. Backends (one BackendCard per registered backend)
+      3. Sensation tester
+      4. Panic button (Esc keybind dispatches to its handler)
+    Recent triggers panel appears in A3.  *@
+
+<div @onkeydown="OnKeyDown" tabindex="0">
+    <Header />
+
+    <h2>Backends</h2>
+    @foreach (var backend in Registry.All)
+    {
+        <BackendCard Backend="@backend" />
+    }
+
+    <SensationTester />
+
+    <PanicButton @ref="_panic" />
+</div>
+
+@code {
+    private PanicButton? _panic;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && _panic is not null)
+        {
+            await _panic.FirePanicFromKeyboard();
+        }
+    }
+}

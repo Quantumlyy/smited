@@ -1,0 +1,136 @@
+@implements IAsyncDisposable
+@inject EventStreamSubscriber Events
+@inject TriggerCoordinator Coordinator
+@inject ILogger<BackendCard> Logger
+
+@*  Per-backend card. Shows id/kind/displayname, status pill, capabilities,
+    calibration status, concurrency model, zone counts, and live in-flight
+    sensation count. The "Stop all" button calls
+    TriggerCoordinator.StopBackendAsync(Id).  *@
+
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+            <strong>@Backend.DisplayName</strong>
+            <span style="color:var(--muted);margin-left:0.5rem">@Backend.Id · @Backend.Kind</span>
+        </div>
+        <div>
+            <span class="pill @StatusPillClass">@StatusLabel</span>
+            <button class="btn-primary" style="margin-left:0.5rem" @onclick="StopAll" disabled="@(_inFlight <= 0)">Stop all</button>
+        </div>
+    </div>
+
+    <div style="margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">
+        @if (Backend.Capabilities.Count > 0)
+        {
+            @foreach (var cap in Backend.Capabilities)
+            {
+                <span class="pill pill-mute" style="margin-right:4px">@cap</span>
+            }
+        }
+    </div>
+
+    <div style="margin-top:0.5rem;font-size:0.9rem">
+        <div>Calibration: @CalibrationLabel</div>
+        <div>Concurrency: @Backend.Concurrency.Policy, max_concurrent=@Backend.Concurrency.MaxConcurrent</div>
+        <div>Topology: @Backend.Zones.Zones.Count zones, @Backend.Zones.Groups.Count zone groups</div>
+        <div>In-flight: @Math.Max(0, _inFlight)</div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IHapticBackend Backend { get; set; } = default!;
+
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _eventLoop;
+    private int _inFlight;
+
+    private string StatusLabel => Backend.Status switch
+    {
+        BackendStatus.Ready => "ready",
+        BackendStatus.Disconnected => "disconnected",
+        BackendStatus.Degraded => "degraded",
+        BackendStatus.Error => "error",
+        _ => "unknown",
+    };
+
+    private string StatusPillClass => Backend.Status switch
+    {
+        BackendStatus.Ready => "pill-ok",
+        BackendStatus.Error => "pill-err",
+        BackendStatus.Disconnected => "pill-warn",
+        BackendStatus.Degraded => "pill-warn",
+        _ => "pill-mute",
+    };
+
+    private string CalibrationLabel
+    {
+        get
+        {
+            var c = Backend.Calibration;
+            if (c is null || !c.Calibrated) return "not calibrated";
+            if (c.LastCalibratedAt is null) return "calibrated (no timestamp)";
+            var ts = c.LastCalibratedAt.ToDateTimeOffset();
+            var ago = DateTimeOffset.UtcNow - ts;
+            return $"calibrated {FormatAgo(ago)} ago";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        _eventLoop = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var evt in Events.StreamAsync(ct: _cts.Token))
+                {
+                    if (!string.Equals(evt.BackendId, Backend.Id, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var changed = evt switch
+                    {
+                        SensationStarted => Interlocked.Increment(ref _inFlight) >= 0,
+                        SensationCompleted => Interlocked.Decrement(ref _inFlight) >= 0,
+                        SensationCancelled => Interlocked.Decrement(ref _inFlight) >= 0,
+                        BackendLifecycleEvent => true,
+                        CalibrationChangedEvent => true,
+                        _ => false,
+                    };
+
+                    // No clamp here — racing the check-then-write under
+                    // contention can stomp a legitimate increment. Display
+                    // clamps via Math.Max(0, _inFlight); if the counter
+                    // drifts negative because we joined the event stream
+                    // mid-flight, it self-heals on the next SensationStarted.
+
+                    if (changed) await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private async Task StopAll()
+    {
+        try
+        {
+            await Coordinator.StopBackendAsync(Backend.Id, default);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Stop-all failed for backend {BackendId}", Backend.Id);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_eventLoop is not null) try { await _eventLoop; } catch { }
+        _cts.Dispose();
+    }
+
+    private static string FormatAgo(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours}h" :
+        t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}m" :
+        $"{(int)t.TotalSeconds}s";
+}

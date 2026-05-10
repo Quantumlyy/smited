@@ -1,0 +1,98 @@
+@implements IAsyncDisposable
+@inject IOptions<SmitedOptions> Options
+@inject DaemonStartTime StartTime
+@inject BackendRegistry Registry
+@inject EventStreamSubscriber Events
+
+@*  Top-of-page status bar. Shows daemon name, ports, uptime, and a status
+    pill that aggregates BackendStatus across all registered backends.
+    Subscribes to BackendLifecycleEvent so the pill updates live; ticks
+    every second for the uptime readout.  *@
+
+<header class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+            <strong>smited</strong>
+            <span class="pill @StatusPillClass">@StatusLabel</span>
+        </div>
+        <div style="color:var(--muted);font-size:0.85rem">
+            uptime @Uptime &nbsp;·&nbsp;
+            gRPC :@Options.Value.GrpcPort &nbsp;·&nbsp;
+            panic :@Options.Value.PanicPort &nbsp;·&nbsp;
+            admin :@Options.Value.Admin.Port
+        </div>
+    </div>
+</header>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _uptimeLoop;
+    private Task? _eventLoop;
+
+    private string Uptime => FormatUptime(DateTimeOffset.UtcNow - StartTime.At);
+
+    private string StatusLabel
+    {
+        get
+        {
+            var statuses = Registry.All.Select(b => b.Status).ToArray();
+            if (statuses.Length == 0) return "no backends";
+            if (statuses.Any(s => s == BackendStatus.Ready)) return "ready";
+            if (statuses.All(s => s == BackendStatus.Error)) return "error";
+            return "degraded";
+        }
+    }
+
+    private string StatusPillClass => StatusLabel switch
+    {
+        "ready" => "pill-ok",
+        "error" => "pill-err",
+        _ => "pill-warn",
+    };
+
+    protected override void OnInitialized()
+    {
+        _uptimeLoop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!_cts.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), _cts.Token);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+
+        _eventLoop = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var evt in Events.StreamAsync(ct: _cts.Token))
+                {
+                    if (evt is BackendLifecycleEvent)
+                    {
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_uptimeLoop is not null) try { await _uptimeLoop; } catch { }
+        if (_eventLoop is not null) try { await _eventLoop; } catch { }
+        _cts.Dispose();
+    }
+
+    private static string FormatUptime(TimeSpan t) =>
+        t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}h {t.Minutes}m"
+            : t.TotalMinutes >= 1
+                ? $"{t.Minutes}m {t.Seconds}s"
+                : $"{t.Seconds}s";
+}
