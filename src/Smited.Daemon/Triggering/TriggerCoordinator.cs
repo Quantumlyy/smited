@@ -87,6 +87,19 @@ internal sealed class TriggerCoordinator
                 return Reject(input, TriggerErrorCode.RateLimited, reject.Reason, "concurrency");
 
             case ConcurrencyDecision.Preempt preempt:
+                // Preempt: cancel the old sensation's CTS but do NOT call
+                // backend.StopAsync. Two reasons:
+                //   1. The dispatch task watches its CTS and exits its
+                //      own send loop on cancel; calling StopAsync would
+                //      force the backend to issue a redundant device
+                //      stop, which is exactly the silencing race
+                //      OwoBackend's SendAndStamp/StopIfStillLatest
+                //      protocol is designed to avoid.
+                //   2. Whether to physically silence the device on
+                //      preempt is a backend concern (some backends
+                //      overlap-mix; some are exclusive). The coordinator
+                //      doesn't have the info to decide. Backends know
+                //      via their own concurrency model.
                 foreach (var preempted in preempt.ToCancel)
                 {
                     _logger.LogInformation(

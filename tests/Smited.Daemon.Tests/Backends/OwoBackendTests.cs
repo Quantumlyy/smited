@@ -356,38 +356,78 @@ public class OwoBackendTests
     }
 
     [Fact]
-    public async Task StopAsync_then_TriggerAsync_does_not_silence_the_replacement_via_lingering_old_catch()
+    public async Task Preemption_via_caller_ct_cancel_does_not_silence_replacement()
     {
-        // Regression for the CANCEL_OLDEST race: the coordinator's
-        // preempt path is StopAsync(old) followed by TriggerAsync(new).
-        // OWO.Stop() is global; if the OLD playback task's OCE catch
-        // fires AFTER the NEW playback's first Send, the catch's own
-        // _sdk.Stop() silences the replacement.
+        // Regression for the actual CANCEL_OLDEST race: the
+        // TriggerCoordinator's preempt path cancels the old sensation's
+        // CTS directly and dispatches the replacement via TriggerAsync —
+        // it does NOT call backend.StopAsync. This test mirrors that
+        // path: the old's caller token is cancelled directly while a
+        // new TriggerAsync is fired.
+        //
+        // OWO.Stop() is global; if the old playback's OCE catch fires
+        // AFTER the new's first Send, the catch's own _sdk.Stop() would
+        // silence the replacement. SendAndStamp/StopIfStillLatest's
+        // sequence-number check prevents that — the old catch sees its
+        // sequence is no longer latest and stands down.
         var backend = await NewReadyBackend();
         await using var ____ = backend.B;
 
-        await backend.B.TriggerAsync(MakeRequest("old", TimeSpan.FromSeconds(5)), CancellationToken.None);
-        await Task.Delay(50); // Let the dispatch loop fire old's first Send.
+        using var oldCts = new CancellationTokenSource();
+        await backend.B.TriggerAsync(MakeRequest("old", TimeSpan.FromSeconds(5)), oldCts.Token);
+        await Task.Delay(50); // let old's first Send fire
 
         backend.Sdk.Received(1).Send(Arg.Any<OwoSendCommand>());
         backend.Sdk.DidNotReceive().Stop();
 
-        // Coordinator preempt: stop the old, immediately trigger the new.
-        var stopped = await backend.B.StopAsync(
-            new BackendStopRequest("old", All: false), CancellationToken.None);
-        stopped.Should().Be(1);
-        backend.Sdk.Received(1).Stop();
-
+        // Coordinator preempt: cancel old's token directly (NOT via
+        // StopAsync), then immediately fire the replacement.
+        oldCts.Cancel();
         await backend.B.TriggerAsync(MakeRequest("new", TimeSpan.FromSeconds(5)), CancellationToken.None);
-        await Task.Delay(100); // Let new's Send dispatch AND old's catch run.
+        await Task.Delay(150); // let new's Send dispatch AND old's catch run
 
-        // The new sensation must have been Send'd…
+        // Both Sends fired.
         backend.Sdk.Received(2).Send(Arg.Any<OwoSendCommand>());
-        // …and Stop must NOT have been called a second time. If it had,
-        // the old playback's OCE catch fired after new's Send and
-        // silenced the device.
-        backend.Sdk.Received(1).Stop();
+
+        // Stop must NOT have been called: the old catch saw a higher
+        // sequence after new's Send and stood down. (If old's catch ran
+        // BEFORE new's Send, Stop would be called once and that's also
+        // correct — but the Task.Delay above gives new a head start so
+        // sequence ordering is reliably old→new.)
+        backend.Sdk.DidNotReceive().Stop();
     }
+
+    [Fact]
+    public void StopIfStillLatest_returns_true_and_calls_Stop_when_sequence_is_latest()
+    {
+        var backend = NewBackend(out _, out var sdk);
+
+        var seq = backend.SendAndStamp(MakeCommand("only"));
+
+        backend.StopIfStillLatest(seq).Should().BeTrue();
+        sdk.Received(1).Stop();
+    }
+
+    [Fact]
+    public void StopIfStillLatest_returns_false_and_skips_Stop_when_superseded()
+    {
+        var backend = NewBackend(out _, out var sdk);
+
+        var seqA = backend.SendAndStamp(MakeCommand("A"));
+        backend.SendAndStamp(MakeCommand("B")); // bumps _lastSendSequence past A.
+
+        backend.StopIfStillLatest(seqA).Should().BeFalse();
+        sdk.DidNotReceive().Stop();
+    }
+
+    private static OwoSendCommand MakeCommand(string zoneId) => new(
+        FrequencyHz: 50,
+        DurationSeconds: 0.1f,
+        IntensityPercentage: 50,
+        RampUpSeconds: 0,
+        RampDownSeconds: 0,
+        ExitDelaySeconds: 0,
+        ZoneIds: new[] { zoneId });
 
     [Fact]
     public async Task TriggerAsync_cancellation_after_first_Send_calls_sdk_Stop()

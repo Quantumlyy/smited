@@ -61,6 +61,41 @@ public sealed class OwoBackend : IHapticBackend
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _zoneGroupMembers;
 
     /// <summary>
+    /// Mutex for ordering <see cref="IOwoSdk.Send"/> and the
+    /// <see cref="IOwoSdk.Stop"/> issued from a cancellation/error catch.
+    /// </summary>
+    /// <remarks>
+    /// Synchronous Monitor lock is correct here: every method that takes
+    /// this lock runs synchronously inside it.
+    /// <see cref="IOwoSdk.Send"/> and <see cref="IOwoSdk.Stop"/> are
+    /// non-async (the SDK exposes synchronous calls; the underlying TCP
+    /// write to MyOWO is fast enough that synchronous is the SDK's
+    /// chosen interface). No <c>await</c> happens under this lock; if a
+    /// future SDK release introduces an async surface, switch to
+    /// <see cref="SemaphoreSlim"/> and remove the <c>lock</c> statement.
+    /// </remarks>
+    private readonly object _sdkSync = new();
+
+    /// <summary>
+    /// Monotonically-increasing sequence assigned to each successful
+    /// <see cref="IOwoSdk.Send"/>. Read and incremented exclusively
+    /// under <see cref="_sdkSync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Invariant: a playback task that catches an
+    /// <see cref="OperationCanceledException"/> after sending must call
+    /// <see cref="IOwoSdk.Stop"/> ONLY when its captured sequence still
+    /// equals <see cref="_lastSendSequence"/>. A higher value means a
+    /// newer Send has already replaced ours on the device, and stopping
+    /// would silence the replacement (this is exactly the
+    /// <c>CANCEL_OLDEST</c> preemption race that motivated the
+    /// protocol). Compare-and-stop must happen under the same lock
+    /// acquisition as the read; otherwise a concurrent Send can slip
+    /// between the read and the Stop.
+    /// </remarks>
+    private long _lastSendSequence;
+
+    /// <summary>
     /// Constructed by the daemon's <c>BackendBootstrapper</c> via
     /// <c>ActivatorUtilities.CreateInstance</c>. All collaborators are
     /// resolved from the host DI container — <see cref="IOwoSdk"/> is
@@ -387,13 +422,13 @@ public sealed class OwoBackend : IHapticBackend
         _ = Task.Run(async () =>
         {
             BackendEvent finalEvent;
-            // anySent gates whether OperationCanceledException needs to
-            // call _sdk.Stop(): if cancellation arrives mid-playback the
-            // device is still vibrating, and only OWO.Stop() silences it.
-            // If cancellation arrives before the first Send (e.g. caller
-            // ct already cancelled), there's nothing on the device yet
-            // and we skip the SDK stop entirely.
-            var anySent = false;
+            // mySequence tracks the last Send this playback issued. The
+            // OCE/error catch passes it to StopIfStillLatest, which only
+            // silences the device if no newer Send has superseded ours.
+            // 0 means "no Send happened yet" — StopIfStillLatest's
+            // sequence comparison would fail and skip Stop, which is the
+            // right semantic for a pre-cancelled trigger.
+            long mySequence = 0;
             try
             {
                 for (var i = 0; i < request.Microsensations.Count; i++)
@@ -404,9 +439,7 @@ public sealed class OwoBackend : IHapticBackend
                     linked.Token.ThrowIfCancellationRequested();
 
                     var micro = request.Microsensations[i];
-                    var command = BuildSendCommand(micro, request);
-                    _sdk.Send(command);
-                    anySent = true;
+                    mySequence = SendAndStamp(BuildSendCommand(micro, request));
 
                     if (i < request.Microsensations.Count - 1)
                     {
@@ -429,28 +462,18 @@ public sealed class OwoBackend : IHapticBackend
             }
             catch (OperationCanceledException)
             {
-                // Only call _sdk.Stop() if we sent something AND nobody
-                // else has already issued a Stop on our behalf. The
-                // SkipSdkStop flag (set by StopAsync/DisposeAsync)
-                // prevents CANCEL_OLDEST preemption from silencing the
-                // replacement sensation: the coordinator's flow there is
-                // StopAsync(old) — which calls _sdk.Stop() — followed by
-                // TriggerAsync(new) — which calls _sdk.Send(). If we
-                // also called Stop here, after the new Send had already
-                // fired, we'd silence the device the user is now
-                // expecting to feel.
-                if (anySent && !playback.SkipSdkStop)
+                // Silence the device only if our Send is still the one
+                // playing. CANCEL_OLDEST preemption: coordinator cancels
+                // our token then dispatches the replacement to
+                // TriggerAsync(new); new's SendAndStamp increments
+                // _lastSendSequence past ours, so StopIfStillLatest
+                // returns false and the new sensation keeps playing.
+                // Caller-cancel without replacement: our sequence is
+                // still latest, StopIfStillLatest fires Stop and the
+                // device goes silent.
+                if (mySequence != 0)
                 {
-                    try
-                    {
-                        _sdk.Stop();
-                    }
-                    catch (Exception stopEx)
-                    {
-                        _logger.LogDebug(stopEx,
-                            "OWO backend {Id} threw on Stop() while cancelling {SensationId}",
-                            Id, request.SensationId);
-                    }
+                    StopIfStillLatest(mySequence);
                 }
                 finalEvent = new SensationCancelled(
                     Id,
@@ -465,10 +488,9 @@ public sealed class OwoBackend : IHapticBackend
                 _logger.LogWarning(ex,
                     "OWO sensation {SensationId} failed mid-flight",
                     request.SensationId);
-                if (anySent && !playback.SkipSdkStop)
+                if (mySequence != 0)
                 {
-                    try { _sdk.Stop(); }
-                    catch { /* swallow — already in an error path */ }
+                    StopIfStillLatest(mySequence);
                 }
                 finalEvent = new SensationCancelled(
                     Id,
@@ -518,13 +540,6 @@ public sealed class OwoBackend : IHapticBackend
             {
                 if (_activeSensations.TryRemove(id, out var removed))
                 {
-                    // Tell the playback's catch block we own the SDK
-                    // stop here, before cancelling its token. Otherwise
-                    // its OCE catch may run later — possibly after a
-                    // replacement sensation has already been Send()'d —
-                    // and silence the new playback via OWO's global
-                    // Stop semantics.
-                    removed.MarkStopHandledExternally();
                     SafeCancel(removed.Cts);
                     stopped++;
                 }
@@ -533,7 +548,6 @@ public sealed class OwoBackend : IHapticBackend
         else if (!string.IsNullOrEmpty(request.SensationId)
             && _activeSensations.TryRemove(request.SensationId, out var playback))
         {
-            playback.MarkStopHandledExternally();
             SafeCancel(playback.Cts);
             stopped = 1;
         }
@@ -541,7 +555,14 @@ public sealed class OwoBackend : IHapticBackend
         // Always tell the SDK to silence the device. OWO's Stop() is a
         // global cancel of whatever's playing right now; given the
         // exclusive concurrency model this is the correct semantic for
-        // both per-id and All stops.
+        // both per-id and All stops. The playback task's OCE catch will
+        // also run (eventually) and call StopIfStillLatest, which is a
+        // no-op now because StopAsync's _sdk.Stop() doesn't touch
+        // _lastSendSequence — the catch's compare-and-stop sees its
+        // sequence as latest and would fire a redundant Stop on an
+        // already-silenced device. Harmless: there's no replacement
+        // Send to silence on the StopAsync path (the coordinator
+        // doesn't call StopAsync during preempt).
         if (stopped > 0)
         {
             try
@@ -591,15 +612,15 @@ public sealed class OwoBackend : IHapticBackend
         // each one's completion signal. Each playback's TCS is resolved
         // only after its SensationCancelled event is written to
         // _events — awaiting here ensures those events make the channel
-        // before TryComplete shuts the writer below. We also mark each
-        // playback so its OCE catch skips _sdk.Stop() — DisposeAsync
-        // calls _sdk.Stop() itself further down, and unlike StopAsync
-        // there's no replacement sensation to worry about, but the
-        // double-Stop is still pointless noise.
+        // before TryComplete shuts the writer below.
+        // The playback's StopIfStillLatest in its OCE catch will fire a
+        // redundant _sdk.Stop() if its sequence is still latest. That's
+        // harmless: there's no replacement Send during DisposeAsync
+        // (this path is only entered on backend shutdown), so silencing
+        // an already-stopping device is a no-op.
         var snapshot = _activeSensations.Values.ToArray();
         foreach (var playback in snapshot)
         {
-            playback.MarkStopHandledExternally();
             SafeCancel(playback.Cts);
         }
         foreach (var playback in snapshot)
@@ -871,42 +892,72 @@ public sealed class OwoBackend : IHapticBackend
             : defaultValue;
 
     /// <summary>
+    /// Sends <paramref name="command"/> to the SDK and returns the
+    /// sequence number assigned to it. Callers capture the returned
+    /// sequence and later pass it to <see cref="StopIfStillLatest"/>
+    /// from a cancellation/error catch to avoid silencing a newer Send
+    /// (the CANCEL_OLDEST preemption race).
+    /// </summary>
+    /// <remarks>
+    /// Send and increment happen under <see cref="_sdkSync"/> so the
+    /// catch's compare-and-stop sees a coherent view: either it runs
+    /// before any newer Send and observes its own sequence as latest
+    /// (and stops the device), or it runs after and observes a higher
+    /// sequence (and stands down).
+    /// </remarks>
+    internal long SendAndStamp(OwoSendCommand command)
+    {
+        lock (_sdkSync)
+        {
+            _sdk.Send(command);
+            var sequence = ++_lastSendSequence;
+            _logger.LogDebug(
+                "OWO Send dispatched: backend_id={BackendId} sequence={Sequence}",
+                Id, sequence);
+            return sequence;
+        }
+    }
+
+    /// <summary>
+    /// Calls <see cref="IOwoSdk.Stop"/> only if the supplied sequence
+    /// still represents the latest Send on the device. Returns whether
+    /// Stop was actually invoked, for log/test observability.
+    /// </summary>
+    internal bool StopIfStillLatest(long capturedSequence)
+    {
+        lock (_sdkSync)
+        {
+            if (_lastSendSequence != capturedSequence)
+            {
+                _logger.LogDebug(
+                    "OWO Stop suppressed: backend_id={BackendId} captured_sequence={Captured} superseded by {Latest}",
+                    Id, capturedSequence, _lastSendSequence);
+                return false;
+            }
+            try
+            {
+                _sdk.Stop();
+                _logger.LogDebug(
+                    "OWO Stop fired: backend_id={BackendId} sequence={Sequence}",
+                    Id, capturedSequence);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "OWO SDK Stop threw during sequence-protected catch");
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
     /// Tracks an in-flight playback's cancellation source plus a
     /// completion task that fires only after the matching final
     /// <see cref="BackendEvent"/> (Completed or Cancelled) has been
     /// written to the event channel. <see cref="DisposeAsync"/> awaits
     /// these so shutdown doesn't drop end-of-life events.
     /// </summary>
-    /// <remarks>
-    /// <see cref="SkipSdkStop"/> is the load-bearing piece that prevents
-    /// CANCEL_OLDEST preemption from silencing its own replacement.
-    /// <c>OWO.Stop()</c> is global — it cancels whatever sensation is
-    /// playing right now, regardless of which logical sensation owned
-    /// it. When <see cref="StopAsync"/> or <see cref="DisposeAsync"/>
-    /// handles the SDK stop itself, they flip this flag so the playback
-    /// task's <c>OperationCanceledException</c> catch (which observes
-    /// the cancelled token only after the thread pool gets to it, and
-    /// possibly after the coordinator has already issued a replacement
-    /// <c>_sdk.Send</c>) doesn't double up and stop the new sensation.
-    /// Cancellations that don't go through StopAsync/DisposeAsync —
-    /// e.g. the caller's gRPC token aborting mid-playback — leave this
-    /// flag false so the catch still silences the device.
-    /// </remarks>
-    private sealed class ActivePlayback
-    {
-        public ActivePlayback(CancellationTokenSource cts, Task task)
-        {
-            Cts = cts;
-            Task = task;
-        }
-
-        public CancellationTokenSource Cts { get; }
-
-        public Task Task { get; }
-
-        public bool SkipSdkStop { get; private set; }
-
-        public void MarkStopHandledExternally() => SkipSdkStop = true;
-    }
+    private sealed record ActivePlayback(CancellationTokenSource Cts, Task Task);
 }
 #endif
