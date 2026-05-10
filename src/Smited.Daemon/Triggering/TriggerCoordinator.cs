@@ -176,6 +176,25 @@ internal sealed class TriggerCoordinator
             input.ClientTraceId,
             resolution.Microsensations);
 
+        // Defense-in-depth re-check: a panic that fired between the
+        // top-of-method breaker gate and now (we awaited
+        // _concurrency.AdmitAsync) would have tripped the breaker but
+        // we've already passed validation and reserved a concurrency
+        // slot. Reject before dispatching so the sensation never
+        // reaches the backend's _activeSensations dictionary, where a
+        // racing panic StopAsync's snapshot might miss it. Release the
+        // concurrency slot (and the _active entry we just inserted)
+        // first so the breaker rejection doesn't leak state.
+        if (_breaker.IsTripped)
+        {
+            ReleaseInternal(active);
+            return Reject(input, TriggerErrorCode.BackendUnavailable,
+                $"BREAKER_TRIPPED: daemon panic latched at {_breaker.TrippedAt:o}; "
+              + $"reason: {_breaker.TripReason ?? "<unspecified>"}. "
+              + "Re-arm via the admin UI to resume triggering.",
+                field: null);
+        }
+
         BackendTriggerResult result;
         try
         {

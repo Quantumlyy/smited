@@ -109,8 +109,19 @@ internal sealed class SmitedActionService
     {
         var timestamp = _time.GetUtcNow();
         _logger.LogCritical(
-            "PANIC stop requested (source={Source}, peer={Peer}, userAgent={UserAgent}); stopping all sensations across all backends and tripping breaker",
+            "PANIC stop requested (source={Source}, peer={Peer}, userAgent={UserAgent}); tripping breaker and stopping all sensations across all backends",
             source, peer ?? "<n/a>", userAgent ?? "<n/a>");
+
+        // Trip the breaker FIRST, before StopAsync. A trigger arriving
+        // while StopAsync is mid-flight needs to be rejected, otherwise
+        // it slips past the coordinator's breaker check (untripped at
+        // that instant), gets accepted by the backend, and may insert
+        // into the backend's _activeSensations dictionary AFTER
+        // StopAsync's snapshot — so the panic stop misses it and the
+        // sensation continues playing. Tripping first closes that race.
+        // The coordinator's TriggerAsync also re-checks the breaker
+        // immediately before dispatch as a defense-in-depth measure.
+        _breaker.Trip($"panic from {source}");
 
         int stopped;
         try
@@ -121,13 +132,8 @@ internal sealed class SmitedActionService
         catch (Exception ex)
         {
             _logger.LogCritical(ex,
-                "PANIC stop FAILED (source={Source}); coordinator threw", source);
-            // Trip the breaker even on coordinator failure: the operator
-            // explicitly invoked panic, and the daemon should refuse new
-            // triggers until they verify state and re-arm. Better to be
-            // overly cautious here than to let triggers continue against
-            // a wedged coordinator.
-            _breaker.Trip($"panic from {source} (stop failed: {ex.Message})");
+                "PANIC stop FAILED (source={Source}); coordinator threw. Breaker is already tripped so triggers will keep rejecting until re-armed",
+                source);
             _ = _history.RecordPanicAsync(new PanicRecord
             {
                 Timestamp = timestamp,
@@ -139,12 +145,6 @@ internal sealed class SmitedActionService
             });
             throw;
         }
-
-        // Latch the breaker so subsequent triggers reject. The user
-        // explicitly invoked panic; they're saying "stop and don't
-        // restart until I say so." The re-arm flow (challenge/response
-        // via the admin UI) is the only path back to a triggering daemon.
-        _breaker.Trip($"panic from {source}");
 
         _logger.LogCritical(
             "PANIC stop completed (source={Source}, stoppedCount={StoppedCount}); breaker tripped",
