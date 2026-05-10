@@ -127,6 +127,10 @@
         _cts.Cancel();
         if (_eventLoop is not null) try { await _eventLoop; } catch { }
         _cts.Dispose();
+        // Release the per-component EventBus.Subscription. Without this
+        // the subscription leaks until the Blazor circuit ends (browser
+        // close); with it, an unmounted card releases immediately.
+        await Events.DisposeAsync();
     }
 
     private static string FormatAgo(TimeSpan t) =>

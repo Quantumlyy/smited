@@ -98,6 +98,40 @@ public class EventStreamSubscriberTests : IDisposable
         await sub2.DisposeAsync();
     }
 
+    /// <summary>
+    /// Locks in the no-leak contract from Round-N+1 fix #4: components
+    /// dispose their <see cref="EventStreamSubscriber"/> on unmount, and
+    /// disposing the subscriber must in turn release the underlying
+    /// <see cref="EventBus.Subscription"/>. Pre-fix, the subscription
+    /// leaked until the Blazor circuit ended (browser close); the
+    /// regression would re-introduce that leak silently.
+    /// </summary>
+    [Fact]
+    public async Task Disposing_subscriber_releases_underlying_subscription()
+    {
+        var bus = _fixture.EventBus;
+        var sub = _fixture.Services.GetRequiredService<EventStreamSubscriber>();
+        var baseline = bus.SubscriberCount;
+
+        using var cts = new CancellationTokenSource();
+        var stream = sub.StreamAsync(ct: cts.Token);
+        var enumerator = stream.GetAsyncEnumerator();
+        var moveNext = enumerator.MoveNextAsync().AsTask();
+
+        // Wait for the subscription to actually attach to the bus.
+        await WaitForSubscribersAsync(bus, expected: baseline + 1, timeout: TimeSpan.FromSeconds(1));
+        bus.SubscriberCount.Should().Be(baseline + 1);
+
+        await sub.DisposeAsync();
+        cts.Cancel();
+        try { await moveNext; } catch { }
+
+        bus.SubscriberCount.Should().Be(baseline,
+            "disposing the subscriber must release its underlying EventBus.Subscription");
+
+        await enumerator.DisposeAsync();
+    }
+
     private static async Task WaitForSubscribersAsync(EventBus bus, int expected, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;

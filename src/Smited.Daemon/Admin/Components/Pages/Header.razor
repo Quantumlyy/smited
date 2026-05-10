@@ -87,6 +87,10 @@
         if (_uptimeLoop is not null) try { await _uptimeLoop; } catch { }
         if (_eventLoop is not null) try { await _eventLoop; } catch { }
         _cts.Dispose();
+        // Release the per-component EventBus.Subscription. Without this
+        // the subscription leaks until the Blazor circuit ends (browser
+        // close); with it, an unmounted component releases immediately.
+        await Events.DisposeAsync();
     }
 
     private static string FormatUptime(TimeSpan t) =>
