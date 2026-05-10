@@ -92,7 +92,7 @@ The daemon is a thin layer between gRPC clients and pluggable haptic backends. E
 
 ### Bodymap framework (`BodyMap/`)
 
-`BodyMapValidator` runs after every descriptor has registered. For each `Smited:BodyMap:Placements` entry — a (`BackendId`, `ZoneIds[]`, `Region`) tuple — it checks the placement against the backend's manufacturer-mandated `IHapticBackend.ForbiddenRegions` (non-overridable) and smited's own `SmitedDefaultForbiddenRegions` (overridable via `AllowOverrideRegions`). The check walks **up the region hierarchy** so subregion declarations cannot bypass parent-region bans. Forbidden-region errors deregister the offending backend and dispose it; unknown-backend / unknown-zone errors abort startup outright. The validator's output (per-backend region set, per-region backend set, per-zone region map) lands in the `BodyMapState` daemon singleton; `TriggerCoordinator` reads `OverlapPolicy` and calls `CheckOverlap` on every trigger to enforce the `Refuse` policy at dispatch time. See [`docs/body-map.md`](docs/body-map.md) for the user-facing taxonomy and policy semantics.
+`BodyMapValidator` runs after every descriptor has registered. For each `Smited:BodyMap:Placements` entry — a (`BackendId`, `ZoneIds[]`, `Region`) tuple — it checks the placement against the backend's manufacturer-mandated `IHapticBackend.ForbiddenRegions` (non-overridable) and smited's own `SmitedDefaultForbiddenRegions` (overridable via `AllowOverrideRegions`). The check uses `RegionHierarchy.Overlaps` symmetrically so subregion declarations cannot bypass parent-region bans and parent declarations cannot bypass child-region bans. Validation also catches duplicate (post-group-expansion) leaf zones, empty `ZoneIds` lists, and unknown backend/zone references. Every error kind except `BackendDeclined` (placement targets a declared backend whose factory legitimately declined, e.g. `owo_skin` on Mac) is fatal-throw — the daemon refuses to start until the user fixes the configuration. The validator's output (per-backend region set, per-region backend set, per-zone region map) lands in the `BodyMapState` daemon singleton; `TriggerCoordinator` reads `OverlapPolicy` and calls `CheckOverlap` on every trigger to enforce the `Refuse` policy at dispatch time. See [`docs/body-map.md`](docs/body-map.md) for the user-facing taxonomy and policy semantics.
 
 ### Trigger coordinator (`Triggering/`)
 
@@ -123,7 +123,7 @@ JSON files under `LibraryRoot/<backend_kind>/*.json` are loaded at boot by `Sens
 
 `PanicEndpoint` exposes `/panic` on a separate Kestrel listener (HTTP/1.1, default port 7778). Cancels every active sensation regardless of gRPC state. No auth; LAN/localhost binding is the access control. Logs every invocation at `Critical` so post-mortems have an immediate answer to "why did everything stop".
 
-`StartupBanner` renders a Spectre.Console panel after `ApplicationStarted` showing both ports, backend count (plus a `(N refused)` suffix when the bodymap deregistered backends), bodymap status (`N placements[, M warning(s)]` or `Not configured (warnings off)`), and sensations loaded count.
+`StartupBanner` renders a Spectre.Console panel after `ApplicationStarted` showing both ports, backend count, bodymap status (`N placements[, M warning(s)]` or `Not configured (warnings off)`), and sensations loaded count. Forbidden-region errors are fatal at startup, so by the time the banner renders the bodymap is valid — there's no "refused" state to display.
 
 ## Cross-platform conditional compilation
 

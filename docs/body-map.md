@@ -17,7 +17,7 @@ Lives under `Smited:BodyMap` in `appsettings.json` or the user-config file:
   "Smited": {
     "BodyMap": {
       "OverlapPolicy": "Warn",
-      "AllowOverrideRegions": [],
+      "AllowOverrideRegions": ["ChestOverHeart"],
       "Placements": [
         {
           "BackendId": "mock-owo",
@@ -39,6 +39,8 @@ Lives under `Smited:BodyMap` in `appsettings.json` or the user-config file:
 Each placement maps **one backend's zones** onto **one body region**. A backend whose zones span multiple regions appears as multiple placement entries — one per region. `ZoneIds` may include zone-group ids (e.g. OWO's `arms` group); the validator expands them to the underlying leaf zones.
 
 `Description` is free-form and exists for the user's own bookkeeping; the daemon ignores it.
+
+> **Why `AllowOverrideRegions: ["ChestOverHeart"]`?** smited's default-forbidden region list includes `ChestOverHeart` (a sub-region of `ChestFront`) as a conservative cardiac safeguard. Any placement in `ChestFront` implicitly overlaps `ChestOverHeart` and is rejected unless the user opts in by adding `ChestOverHeart` to `AllowOverrideRegions`. Examples in this doc that place zones in `ChestFront`, `Face`, `Throat`, or `Pelvis` carry the matching override; see [Forbidden regions](#forbidden-regions) below for the full list and rationale.
 
 ## Overlap policy
 
@@ -116,6 +118,7 @@ The enum `Smited.Daemon.BodyMap.BodyRegion` covers ~30 named regions. They are d
     },
     "BodyMap": {
       "OverlapPolicy": "Refuse",
+      "AllowOverrideRegions": ["ChestOverHeart"],
       "Placements": [
         {
           "BackendId": "owo-primary",
@@ -135,18 +138,20 @@ The enum `Smited.Daemon.BodyMap.BodyRegion` covers ~30 named regions. They are d
 
 Startup: both backends register, the validator emits one warning (`Region 'ChestFront' is covered by 2 backends: owo-primary, tactsuit`), and the banner reads `Body map  2 placements, 1 warning`. With `OverlapPolicy: "Refuse"`, the next gRPC trigger that resolves to `pectoral_l` on `owo-primary` returns `accepted=false` with `INVALID_ZONE` and a message naming `tactsuit` as the conflicting backend. Switch the policy to `Warn` (or remove it; `Warn` is the default) and the same trigger proceeds normally.
 
+The `AllowOverrideRegions: ["ChestOverHeart"]` line is required because both placements land in `ChestFront`, which overlaps the default-forbidden cardiac sub-region; without it, the validator rejects both placements and the daemon refuses to start.
+
 ## Banner
 
-The startup banner gains two pieces of information:
+The startup banner shows the bodymap status alongside the rest of the daemon state:
 
 ```
 ╭─smited──────────────────────────────────────────────╮
 │ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)│
 │ Panic       POST http://127.0.0.1:7778/panic        │
-│ Backends    2 registered (1 refused)                │
+│ Backends    2 registered                            │
 │ Body map    3 placements, 1 warning                 │
 │ Sensations  10 loaded                               │
 ╰─────────────────────────────────────────────────────╯
 ```
 
-`(N refused)` appears only when the bodymap deregistered backends. `Body map` reads `Not configured (warnings off)` in grey when no placements are declared.
+`Body map` reads `Not configured (warnings off)` in grey when no placements are declared. Forbidden-region errors and unknown-backend / unknown-zone errors are fatal: the daemon refuses to start until the user fixes the configuration, so the banner never reports them — by the time you see it, the bodymap is valid.
