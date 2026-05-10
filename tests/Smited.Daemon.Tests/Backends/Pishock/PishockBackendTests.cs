@@ -347,12 +347,13 @@ public class PishockBackendTests
         // uses the authored 100ms to time its concurrency-slot release,
         // the slot frees while the device is still firing and a follow-up
         // trigger overlaps the in-flight op. EstimatedDuration must
-        // reflect the wire reality so the coordinator's slot release
-        // matches.
+        // reflect the wire reality (cloud-rounded duration + HTTP budget)
+        // so the coordinator's slot release matches.
         var (backend, _, _) = NewBackend(new PishockBackendOptions
         {
             Mode = PishockTransportMode.Cloud,
             Username = "u", ApiKey = "k", ShareCode = "s",
+            RequestTimeoutMs = 200,
         });
         await using var __ = backend;
 
@@ -360,7 +361,8 @@ public class PishockBackendTests
             MakeRequest(PishockOp.Vibrate, durationMs: 100, intensity: 30),
             CancellationToken.None);
 
-        result.EstimatedDuration.Should().Be(TimeSpan.FromSeconds(1));
+        // 200ms HTTP budget + 1000ms cloud-rounded effective duration
+        result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(1200));
     }
 
     [Fact]
@@ -370,6 +372,7 @@ public class PishockBackendTests
         {
             Mode = PishockTransportMode.Lan,
             DeviceIp = "192.168.1.50",
+            RequestTimeoutMs = 200,
         });
         await using var __ = backend;
 
@@ -377,7 +380,47 @@ public class PishockBackendTests
             MakeRequest(PishockOp.Vibrate, durationMs: 250, intensity: 30),
             CancellationToken.None);
 
-        result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(250));
+        // 200ms HTTP budget + 250ms LAN passthrough
+        result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(450));
+    }
+
+    [Fact]
+    public async Task TriggerAsync_pads_estimated_duration_with_RequestTimeoutMs_per_fireable_pulse()
+    {
+        // The slot release happens at EstimatedDuration; without the
+        // HTTP RTT budget, a slow request stays in flight when the slot
+        // opens and a follow-up trigger races on the same shocker.
+        // Padding with RequestTimeoutMs is conservative — actual RTT
+        // is typically much shorter — but correct: the device can
+        // never be firing concurrently with another trigger's wire
+        // traffic.
+        var (backend, _, _) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            RequestTimeoutMs = 250,
+            MaxBurst = 5,
+        });
+        await using var __ = backend;
+
+        var request = new BackendTriggerRequest(
+            SensationId: "seq",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[]
+            {
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 0),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 50),
+            });
+
+        var result = await backend.TriggerAsync(request, CancellationToken.None);
+
+        // 2 fireable pulses × (250ms HTTP + 100ms duration) + 50ms delay_before
+        // = 700ms + 50ms = 750ms
+        result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(750));
     }
 
     private static BackendTriggerRequest MakeRequest(PishockOp op, int durationMs, int intensity)

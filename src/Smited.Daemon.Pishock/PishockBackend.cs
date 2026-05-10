@@ -132,7 +132,17 @@ public sealed class PishockBackend : IHapticBackend
                 "rate_limit");
         }
 
-        var estimated = MicrosensationReader.ComputeEstimatedDuration(request, _options.Mode);
+        // Pad EstimatedDuration with the per-request HTTP timeout so
+        // the coordinator's slot-release timer covers the full
+        // wall-clock playback (delay_before + HTTP RTT + effective
+        // device fire) for each fireable microsensation. Without this,
+        // a slow request stays in flight when the slot opens and a
+        // second trigger admits — overlapping the previous op on the
+        // single-channel hardware. Conservative: actual RTT is usually
+        // far below RequestTimeoutMs, but the slot release must use a
+        // worst-case bound for correctness.
+        var estimated = MicrosensationReader.ComputeEstimatedDuration(
+            request, _options.Mode, _options.RequestTimeoutMs);
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),

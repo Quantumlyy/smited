@@ -48,14 +48,34 @@ internal static class MicrosensationReader
         return (int)Math.Round(authored * clamped / 100.0);
     }
 
+    /// <summary>
+    /// Computes the estimated wall-clock playback duration. The
+    /// optional <paramref name="httpBudgetMs"/> is added once per
+    /// fireable microsensation so the coordinator's slot-release timer
+    /// also covers the per-pulse HTTP round-trip — without that
+    /// padding, a slow request can still be in flight when the slot
+    /// opens and a follow-up trigger races on the same shocker. The
+    /// mock backend passes <c>0</c> (no real HTTP); the real backend
+    /// passes <see cref="PishockBackendOptions.RequestTimeoutMs"/>.
+    /// Zero-duration microsensations are skipped (they're delay-only
+    /// no-ops, never reach the client).
+    /// </summary>
     public static TimeSpan ComputeEstimatedDuration(
-        BackendTriggerRequest request, PishockTransportMode mode)
+        BackendTriggerRequest request, PishockTransportMode mode, int httpBudgetMs = 0)
     {
         var total = TimeSpan.Zero;
         foreach (var micro in request.Microsensations)
         {
-            total += ReadDuration(micro, "delay_before")
-                + PishockDurationPolicy.Effective(mode, ReadDuration(micro, "duration"));
+            total += ReadDuration(micro, "delay_before");
+            var duration = ReadDuration(micro, "duration");
+            if (duration > TimeSpan.Zero)
+            {
+                if (httpBudgetMs > 0)
+                {
+                    total += TimeSpan.FromMilliseconds(httpBudgetMs);
+                }
+                total += PishockDurationPolicy.Effective(mode, duration);
+            }
         }
         return total;
     }
