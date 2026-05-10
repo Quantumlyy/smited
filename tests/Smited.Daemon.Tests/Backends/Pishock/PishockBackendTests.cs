@@ -1,0 +1,195 @@
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Smited.Daemon.Backends;
+using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.Pishock;
+using Smited.V1;
+using Xunit;
+using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
+
+namespace Smited.Daemon.Tests.Backends.Pishock;
+
+public class PishockBackendTests
+{
+    private static (PishockBackend backend, FakeClient client, FakeTimeProvider time) NewBackend(
+        PishockBackendOptions? options = null,
+        string id = "pishock-test")
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero));
+        var client = new FakeClient();
+        var backend = new PishockBackend(
+            id,
+            options ?? new PishockBackendOptions(),
+            client,
+            time,
+            NullLogger<PishockBackend>.Instance);
+        return (backend, client, time);
+    }
+
+    [Fact]
+    public void Kind_is_pishock_matching_the_real_hardware_family()
+    {
+        var (backend, _, _) = NewBackend();
+        backend.Kind.Should().Be("pishock");
+    }
+
+    [Fact]
+    public async Task TriggerAsync_calls_client_with_op_duration_and_intensity()
+    {
+        var (backend, client, time) = NewBackend();
+        await using var __ = backend;
+
+        await backend.TriggerAsync(
+            MakeRequest(PishockOp.Vibrate, durationMs: 250, intensity: 40),
+            CancellationToken.None);
+
+        // The client call happens inside the playback task; pump time
+        // to let it register and fire.
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+
+        client.Calls.Should().HaveCount(1);
+        client.Calls[0].Op.Should().Be(PishockOp.Vibrate);
+        client.Calls[0].DurationMs.Should().Be(250);
+        client.Calls[0].Intensity.Should().Be(40);
+    }
+
+    [Fact]
+    public async Task TriggerAsync_calls_client_once_per_microsensation_in_a_sequence()
+    {
+        var (backend, client, time) = NewBackend(new PishockBackendOptions { MaxBurst = 5 });
+        await using var __ = backend;
+
+        var request = new BackendTriggerRequest(
+            SensationId: "seq",
+            SensationName: "deploy_success",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[]
+            {
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 0),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 200),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 200),
+            });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+
+        // The playback task awaits a sequence of Task.Delay(span, time)
+        // calls. Each delay is only registered after the previous one
+        // unblocks AND the task gets execution time. Interleave wall-time
+        // yields with fake-time advances so each successive delay
+        // registers and then fires.
+        await PumpUntil(() => client.Calls.Count >= 3, time, TimeSpan.FromSeconds(2));
+
+        client.Calls.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task TriggerAsync_with_disallowed_op_throws_BackendTriggerRejected_without_calling_client()
+    {
+        var options = new PishockBackendOptions
+        {
+            AllowedOps = new() { PishockOp.Vibrate },
+        };
+        var (backend, client, _) = NewBackend(options);
+        await using var __ = backend;
+
+        var act = async () => await backend.TriggerAsync(
+            MakeRequest(PishockOp.Shock, 200, 10),
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<BackendTriggerRejectedException>();
+        ex.Which.Code.Should().Be(TriggerErrorCode.InvalidParameter);
+        client.Calls.Should().BeEmpty(
+            "validation must reject before any wire traffic — never fire a disallowed op");
+    }
+
+    [Fact]
+    public async Task TriggerAsync_when_client_rejects_logs_warning_and_continues()
+    {
+        var (backend, client, time) = NewBackend();
+        await using var __ = backend;
+
+        client.NextResult = new PishockOpResult(false, "Not Authorized", "Not Authorized");
+
+        await backend.TriggerAsync(
+            MakeRequest(PishockOp.Vibrate, 200, 30),
+            CancellationToken.None);
+
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+        client.Calls.Should().HaveCount(1);
+        // The trigger has already returned Accepted to the coordinator
+        // by the time the client call happens. The device's NO surfaces
+        // as a log line and is documented in pishock.md. A future
+        // refinement could emit a structured BackendError event.
+    }
+
+    [Fact]
+    public async Task Disposing_the_backend_does_not_throw()
+    {
+        var (backend, _, _) = NewBackend();
+        await backend.DisposeAsync();
+    }
+
+    private static BackendTriggerRequest MakeRequest(PishockOp op, int durationMs, int intensity)
+    {
+        return new BackendTriggerRequest(
+            SensationId: $"trigger-{Guid.NewGuid():N}",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { BuildMicro(op, durationMs, intensity, delayBeforeMs: 0) });
+    }
+
+    private static MicrosensationParameters BuildMicro(
+        PishockOp op, int durationMs, int intensity, int delayBeforeMs)
+    {
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["op"] = new ParameterValue.EnumValue(op.ToString()),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(durationMs)),
+            ["intensity"] = new ParameterValue.Number(intensity),
+        };
+        if (delayBeforeMs > 0)
+        {
+            values["delay_before"] = new ParameterValue.Duration(
+                TimeSpan.FromMilliseconds(delayBeforeMs));
+        }
+        return new MicrosensationParameters(values);
+    }
+
+    /// <summary>
+    /// Drives a backend whose playback uses sequential
+    /// <c>Task.Delay(span, fakeTimeProvider)</c> awaits to completion.
+    /// Each iteration yields wall time so the playback task can register
+    /// its next delay, then advances fake time so that delay fires.
+    /// </summary>
+    private static async Task PumpUntil(Func<bool> predicate, FakeTimeProvider time, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (!predicate() && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Yield();
+            await Task.Delay(5);
+            time.Advance(TimeSpan.FromMilliseconds(100));
+        }
+    }
+
+    private sealed class FakeClient : IPishockClient
+    {
+        public List<(PishockOp Op, int DurationMs, int Intensity)> Calls { get; } = new();
+
+        public PishockOpResult NextResult { get; set; } = new(true, "Operation Succeeded.", null);
+
+        public Task<PishockOpResult> SendOpAsync(
+            PishockOp op, int durationMs, int intensity, CancellationToken ct)
+        {
+            Calls.Add((op, durationMs, intensity));
+            return Task.FromResult(NextResult);
+        }
+    }
+}

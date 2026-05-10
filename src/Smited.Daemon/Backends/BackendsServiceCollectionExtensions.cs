@@ -21,10 +21,13 @@ internal static class BackendsServiceCollectionExtensions
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IBackendFactory, MockOwoBackendFactory>());
         // PiShock is cross-platform and multi-instance — no platform
-        // conditional, no AddPishockBackendIfX gate. The mock factory
-        // sits idle in DI when no mock_pishock descriptor exists.
+        // conditional, no AddPishockBackendIfX gate. Both the mock and
+        // real factories register unconditionally; descriptors that
+        // don't apply leave them idle in DI.
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IBackendFactory, MockPishockBackendFactory>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IBackendFactory, PishockBackendFactory>());
         return services;
     }
 
