@@ -2,9 +2,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Smited.Daemon.Backends.Internal;
-using Smited.Daemon.History;
 using Smited.Daemon.Triggering;
 
 namespace Smited.Daemon.Diagnostics;
@@ -19,7 +16,7 @@ namespace Smited.Daemon.Diagnostics;
 /// Listens on its own Kestrel port (HTTP/1.1) so a wedged gRPC pipeline
 /// can't take this endpoint down with it. Bypasses the protovalidate
 /// interceptor (gRPC-only) and any backend-bootstrap gating: as long as
-/// the host is up and <see cref="TriggerCoordinator"/> exists, the
+/// the host is up and <see cref="SmitedActionService"/> exists, the
 /// endpoint works — at worst it stops zero sensations because none are
 /// active.
 ///
@@ -28,6 +25,10 @@ namespace Smited.Daemon.Diagnostics;
 /// even if the panicking client (Streamdeck Companion, curl) drops the
 /// connection mid-flight; otherwise a real backend that honors
 /// cancellation could abort the emergency stop.
+///
+/// CRITICAL-level audit logging and history recording live in the
+/// <see cref="SmitedActionService"/> facade so admin-fired and panic-HTTP-
+/// fired panics produce identical postmortem signals.
 /// </summary>
 internal static class PanicEndpoint
 {
@@ -35,43 +36,20 @@ internal static class PanicEndpoint
     {
         var handler = async (
             HttpContext ctx,
-            TriggerCoordinator coordinator,
-            IHistoryRecorder history,
-            TimeProvider time,
-            IHostApplicationLifetime lifetime,
-            ILogger<PanicMarker> log) =>
+            SmitedActionService actions,
+            IHostApplicationLifetime lifetime) =>
         {
             var peer = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             var userAgent = ctx.Request.Headers.UserAgent.ToString();
-            var timestamp = time.GetUtcNow();
-
-            log.LogCritical(
-                "PANIC stop requested from {Peer} (UA: {UserAgent})",
-                peer, userAgent);
 
             int stopped;
             try
             {
-                stopped = await coordinator.StopAsync(
-                    new BackendStopRequest(SensationId: null, All: true),
-                    lifetime.ApplicationStopping);
+                stopped = await actions.PanicAsync(
+                    TriggerSource.PanicHttp, peer, userAgent, lifetime.ApplicationStopping);
             }
             catch (Exception ex)
             {
-                // Even if the coordinator throws, log loudly and tell the
-                // caller. Don't let a panic invocation silently fail.
-                log.LogCritical(ex,
-                    "PANIC stop FAILED from {Peer}; coordinator threw",
-                    peer);
-                _ = history.RecordPanicAsync(new PanicRecord
-                {
-                    Timestamp = timestamp,
-                    Peer = peer,
-                    UserAgent = userAgent,
-                    Ok = false,
-                    StoppedCount = 0,
-                    Error = ex.Message,
-                });
                 ctx.Response.StatusCode = 500;
                 await ctx.Response.WriteAsJsonAsync(new
                 {
@@ -80,27 +58,6 @@ internal static class PanicEndpoint
                 });
                 return;
             }
-
-            log.LogCritical(
-                "PANIC stop completed from {Peer}, {StoppedCount} sensation(s) cancelled",
-                peer, stopped);
-
-            // History: one panic row plus a paired stop row.
-            _ = history.RecordPanicAsync(new PanicRecord
-            {
-                Timestamp = timestamp,
-                Peer = peer,
-                UserAgent = userAgent,
-                Ok = true,
-                StoppedCount = stopped,
-            });
-            _ = history.RecordStopAsync(new StopRecord
-            {
-                Timestamp = timestamp,
-                Source = "panic",
-                All = true,
-                StoppedCount = stopped,
-            });
 
             await ctx.Response.WriteAsJsonAsync(new
             {
@@ -115,11 +72,4 @@ internal static class PanicEndpoint
 
         return app;
     }
-
-    /// <summary>
-    /// Marker type so PANIC log entries categorise under
-    /// <c>Smited.Daemon.Diagnostics.PanicMarker</c> and stay trivially
-    /// filterable in any sink.
-    /// </summary>
-    internal sealed class PanicMarker { }
 }

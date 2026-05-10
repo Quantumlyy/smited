@@ -1,0 +1,189 @@
+@using Smited.Daemon.History
+@implements IAsyncDisposable
+@inject HistoryQueryService History
+@inject EventStreamSubscriber Events
+
+@*  Recent triggers. Last 50 rows from the history DB on initial load; live
+    appends on SensationCompleted / SensationCancelled events. Click a row
+    to expand for full forensic detail. Built from event payloads (not full
+    DB rows) — so live entries have the columns we render but not every
+    column the DB has; the row the DB writes after the event lands is
+    consistent on next page load.  *@
+
+<section class="card">
+    <h2>Recent triggers</h2>
+    @if (_rows.Count == 0)
+    {
+        <p style="color:var(--muted)">no triggers yet</p>
+    }
+    else
+    {
+        <table style="width:100%;font-size:0.9rem;border-collapse:collapse">
+            <thead>
+                <tr style="text-align:left;color:var(--muted)">
+                    <th>when</th><th>backend</th><th>sensation</th><th>status</th><th>trace</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr style="border-top:1px solid var(--border);cursor:pointer" @onclick="() => Toggle(row.RowKey)">
+                        <td>@FormatAgo(DateTimeOffset.UtcNow - row.Timestamp)</td>
+                        <td>@row.BackendId</td>
+                        <td>@(row.SensationName ?? "<inline>")</td>
+                        <td>
+                            <span class="@PillFor(row.Status)">@row.Status</span>
+                        </td>
+                        <td><code>@Truncate(row.TraceId, 12)</code></td>
+                    </tr>
+                    @if (_expanded == row.RowKey)
+                    {
+                        <tr><td colspan="5" style="background:var(--bg);padding:0.5rem">
+                            <pre style="white-space:pre-wrap;margin:0">@row.Detail</pre>
+                        </td></tr>
+                    }
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private const int Limit = 50;
+    private readonly LinkedList<RowVm> _rows = new();
+    private string? _expanded;
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _eventLoop;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Pattern: the await-foreach loop runs on a background thread (so
+        // the bus's blocking ReadAllAsync doesn't tie up the dispatcher),
+        // but any mutation of component state visible to render must
+        // happen inside InvokeAsync so it serializes against the
+        // renderer's @foreach walks. _rows is the only such state in
+        // this component.
+        var initial = await History.GetRecentAsync(Limit);
+        foreach (var t in initial)
+        {
+            _rows.AddLast(RowVm.FromRecord(t));
+        }
+
+        _eventLoop = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var evt in Events.StreamAsync(ct: _cts.Token))
+                {
+                    var row = evt switch
+                    {
+                        SensationCompleted c => RowVm.FromCompleted(c),
+                        SensationCancelled c => RowVm.FromCancelled(c),
+                        _ => null,
+                    };
+                    if (row is null) continue;
+
+                    await InvokeAsync(() =>
+                    {
+                        _rows.AddFirst(row);
+                        while (_rows.Count > Limit) _rows.RemoveLast();
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private void Toggle(string rowKey) => _expanded = _expanded == rowKey ? null : rowKey;
+
+    /// <summary>
+    /// Backfill rows label the acceptance outcome only — the trigger
+    /// record doesn't know whether the sensation completed normally,
+    /// was cancelled, or failed mid-flight. <c>Accepted</c> is honest;
+    /// <c>Completed</c> would be a lie.
+    /// </summary>
+    internal static string StatusFromRecord(TriggerRecord t) =>
+        t.Accepted ? "Accepted" : "Rejected";
+
+    private static string PillFor(string status) => status switch
+    {
+        "Completed" => "pill pill-ok",
+        "Cancelled" => "pill pill-warn",
+        "Failed"    => "pill pill-err",
+        "Rejected"  => "pill pill-err",
+        "Accepted"  => "pill pill-mute",
+        _           => "pill pill-mute",
+    };
+
+    private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";
+
+    private static string FormatAgo(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours}h ago" :
+        t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}m ago" :
+        $"{(int)t.TotalSeconds}s ago";
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_eventLoop is not null) try { await _eventLoop; } catch { }
+        _cts.Dispose();
+        // Release the per-component EventBus.Subscription. Without this
+        // the subscription leaks until the Blazor circuit ends (browser
+        // close); with it, an unmounted panel releases immediately.
+        await Events.DisposeAsync();
+    }
+
+    private sealed record RowVm(
+        string RowKey,
+        DateTimeOffset Timestamp,
+        string BackendId,
+        string? SensationName,
+        string Status,
+        string TraceId,
+        string Detail)
+    {
+        // TriggerRecord is an *acceptance* record (written when the
+        // coordinator accepts the trigger, before the sensation actually
+        // runs). Whether it ultimately completed, was cancelled, or
+        // failed lives in the lifecycle stream — which the live event
+        // loop already renders accurately. Backfill rows therefore
+        // label the acceptance outcome honestly: "Accepted" or
+        // "Rejected", not "Completed" / "Failed". A future change can
+        // join the Triggers table with the Lifecycle table to surface
+        // the final outcome on backfill rows too.
+        public static RowVm FromRecord(TriggerRecord t) => new(
+            RowKey: $"db-{t.Id}",
+            Timestamp: t.Timestamp,
+            BackendId: t.BackendId,
+            SensationName: t.SensationName,
+            Status: StatusFromRecord(t),
+            TraceId: t.ClientTraceId,
+            Detail: $"sensation_id={t.SensationId}\n" +
+                    $"zones={t.ZoneIdsJson}\n" +
+                    $"intensity_scale={t.IntensityScale?.ToString() ?? "<none>"}\n" +
+                    $"priority={t.Priority}\n" +
+                    $"trace={t.ClientTraceId}\n" +
+                    (t.ErrorCode is null ? "" : $"error={t.ErrorCode} field={t.ErrorField ?? "<none>"}\n") +
+                    (t.Accepted ? "NOTE: outcome unknown after restart — backfilled from acceptance record.\n" : ""));
+
+        public static RowVm FromCompleted(SensationCompleted c) => new(
+            RowKey: $"evt-{c.SensationId}",
+            Timestamp: c.Timestamp,
+            BackendId: c.BackendId,
+            SensationName: c.SensationName,
+            Status: "Completed",
+            TraceId: c.ClientTraceId,
+            Detail: $"sensation_id={c.SensationId}\ntrace={c.ClientTraceId}");
+
+        public static RowVm FromCancelled(SensationCancelled c) => new(
+            RowKey: $"evt-{c.SensationId}",
+            Timestamp: c.Timestamp,
+            BackendId: c.BackendId,
+            SensationName: c.SensationName,
+            Status: "Cancelled",
+            TraceId: c.ClientTraceId,
+            Detail: $"sensation_id={c.SensationId}\ntrace={c.ClientTraceId}\n" +
+                    (c.Reason is null ? "" : $"reason={c.Reason}\n"));
+    }
+}

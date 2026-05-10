@@ -1,0 +1,30 @@
+@page "/"
+@namespace Smited.Daemon.Admin.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>smited admin</title>
+    <base href="/" />
+    <link href="admin.css" rel="stylesheet" />
+</head>
+<body>
+    <component type="typeof(Smited.Daemon.Admin.Components.App)"
+               render-mode="ServerPrerendered" />
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+
+    <script src="_framework/blazor.server.js"></script>
+    <script type="module">
+        import { registerKeyboardShortcuts, unregisterKeyboardShortcuts } from './admin.js';
+        window.smitedAdmin = { registerKeyboardShortcuts, unregisterKeyboardShortcuts };
+    </script>
+</body>
+</html>

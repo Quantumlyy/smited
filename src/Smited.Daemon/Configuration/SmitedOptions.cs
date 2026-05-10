@@ -43,6 +43,8 @@ public sealed class SmitedOptions
 
     public HistoryOptions History { get; set; } = new();
 
+    public AdminOptions Admin { get; set; } = new();
+
     public sealed class BackendsOptions
     {
         /// <summary>
@@ -90,5 +92,27 @@ public sealed class SmitedOptions
         /// <c>%LOCALAPPDATA%\smited\history.db</c>.
         /// </summary>
         public string? CustomPath { get; set; }
+    }
+
+    public sealed class AdminOptions
+    {
+        /// <summary>
+        /// When <c>false</c>, the admin UI listener is not started. Useful
+        /// for production daemons where only gRPC and panic should be
+        /// exposed.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// TCP port for the HTTP/1.1 admin UI listener.
+        /// </summary>
+        public int Port { get; set; } = 7779;
+
+        /// <summary>
+        /// Bind address for the admin listener. Default <c>127.0.0.1</c> —
+        /// same-machine only. Don't change to <c>0.0.0.0</c> until v2 auth
+        /// lands; the admin surface has no authentication in v1.
+        /// </summary>
+        public string BindAddress { get; set; } = "127.0.0.1";
     }
 }

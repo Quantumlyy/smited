@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Text.Json;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.Hosting;
@@ -7,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
 using Smited.Daemon.Events;
-using Smited.Daemon.History;
 using Smited.Daemon.Sensations;
 using Smited.Daemon.Triggering;
 using Smited.V1;
@@ -31,30 +29,24 @@ internal sealed class SmitedGrpcService : SmitedService.SmitedServiceBase
 
     private readonly BackendRegistry _registry;
     private readonly SensationLibrary _library;
-    private readonly TriggerCoordinator _coordinator;
+    private readonly SmitedActionService _actions;
     private readonly EventStream _events;
     private readonly DaemonStartTime _startTime;
-    private readonly IHistoryRecorder _history;
-    private readonly TimeProvider _time;
     private readonly ILogger<SmitedGrpcService> _logger;
 
     public SmitedGrpcService(
         BackendRegistry registry,
         SensationLibrary library,
-        TriggerCoordinator coordinator,
+        SmitedActionService actions,
         EventStream events,
         DaemonStartTime startTime,
-        IHistoryRecorder history,
-        TimeProvider time,
         ILogger<SmitedGrpcService> logger)
     {
         _registry = registry;
         _library = library;
-        _coordinator = coordinator;
+        _actions = actions;
         _events = events;
         _startTime = startTime;
-        _history = history;
-        _time = time;
         _logger = logger;
     }
 
@@ -101,78 +93,29 @@ internal sealed class SmitedGrpcService : SmitedService.SmitedServiceBase
     public override async Task<TriggerResponse> Trigger(TriggerRequest request, ServerCallContext context)
     {
         var input = ProtoMappers.FromProtoTriggerRequest(request);
-        var outcome = await _coordinator.TriggerAsync(input, context.CancellationToken)
+        var outcome = await _actions.TriggerAsync(input, TriggerSource.Grpc, context.CancellationToken)
             .ConfigureAwait(false);
-
-        _ = _history.RecordTriggerAsync(BuildTriggerRecord(input, outcome));
-
         return ProtoMappers.ToProtoTriggerResponse(outcome);
     }
 
     public override async Task<StopResponse> Stop(StopRequest request, ServerCallContext context)
     {
-        var record = new StopRecord
-        {
-            Timestamp = _time.GetUtcNow(),
-            Source = "grpc",
-            All = request.TargetCase == StopRequest.TargetOneofCase.All && request.All,
-            SensationId = request.TargetCase == StopRequest.TargetOneofCase.SensationId
-                ? request.SensationId : null,
-            BackendId = request.TargetCase == StopRequest.TargetOneofCase.BackendId
-                ? request.BackendId : null,
-        };
-
         int stopped = request.TargetCase switch
         {
-            StopRequest.TargetOneofCase.SensationId => await _coordinator.StopAsync(
+            StopRequest.TargetOneofCase.SensationId => await _actions.StopAsync(
                 new BackendStopRequest(request.SensationId, All: false),
+                TriggerSource.Grpc,
                 context.CancellationToken),
-            StopRequest.TargetOneofCase.BackendId => await _coordinator.StopBackendAsync(
-                request.BackendId, context.CancellationToken),
-            StopRequest.TargetOneofCase.All when request.All => await _coordinator.StopAsync(
+            StopRequest.TargetOneofCase.BackendId => await _actions.StopBackendAsync(
+                request.BackendId, TriggerSource.Grpc, context.CancellationToken),
+            StopRequest.TargetOneofCase.All when request.All => await _actions.StopAsync(
                 new BackendStopRequest(null, All: true),
+                TriggerSource.Grpc,
                 context.CancellationToken),
             _ => 0,
         };
 
-        record.StoppedCount = stopped;
-        _ = _history.RecordStopAsync(record);
-
         return new StopResponse { StoppedCount = (uint)stopped };
-    }
-
-    private TriggerRecord BuildTriggerRecord(ResolvedTriggerInput input, TriggerOutcome outcome)
-    {
-        // For accepted triggers prefer the coordinator's resolved zones
-        // and intensity (a named sensation may supply defaults the request
-        // omitted), so the history row reflects what actually played
-        // rather than the request as received.
-        var (sensationId, accepted, errorCode, errorField, zoneIds, intensity) = outcome switch
-        {
-            TriggerOutcome.Accepted a => (
-                a.SensationId, true, (string?)null, (string?)null,
-                (IReadOnlyList<string>)a.ResolvedZoneIds, a.ResolvedIntensityScale),
-            TriggerOutcome.Rejected r => (
-                string.Empty, false, r.Code.ToString(), r.Field,
-                (IReadOnlyList<string>)input.ZoneIds, input.IntensityScale),
-            _ => (
-                string.Empty, false, "Unknown", (string?)null,
-                (IReadOnlyList<string>)input.ZoneIds, input.IntensityScale),
-        };
-        return new TriggerRecord
-        {
-            Timestamp = _time.GetUtcNow(),
-            BackendId = input.BackendId,
-            SensationName = input.SensationName,
-            SensationId = sensationId,
-            ZoneIdsJson = JsonSerializer.Serialize(zoneIds),
-            IntensityScale = intensity,
-            Priority = input.Priority,
-            ClientTraceId = input.ClientTraceId,
-            Accepted = accepted,
-            ErrorCode = errorCode,
-            ErrorField = errorField,
-        };
     }
 
     public override Task<ListSensationsResponse> ListSensations(

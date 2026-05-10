@@ -10,16 +10,24 @@ cd smited
 dotnet run --project src/Smited.Daemon
 ```
 
-The daemon binds gRPC on `127.0.0.1:7777` (h2c) and an emergency-stop HTTP endpoint on `127.0.0.1:7778`. The startup banner shows both:
+The daemon binds:
+
+- gRPC on `127.0.0.1:7777` (h2c)
+- Emergency-stop HTTP on `127.0.0.1:7778`
+- **Admin UI on `127.0.0.1:7779` — open in browser to verify end-to-end**
+
+The startup banner shows all three:
 
 ```
-╭─smited──────────────────────────────────────────────╮
-│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)│
-│ Panic       POST http://127.0.0.1:7778/panic        │
-│ Backends    1 registered                            │
-│ Body map    Not configured (warnings off)           │
-│ Sensations  5 loaded                                │
-╰─────────────────────────────────────────────────────╯
+╭─smited──────────────────────────────────────────────────╮
+│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)    │
+│ Panic       POST http://127.0.0.1:7778/panic            │
+│ Admin       http://127.0.0.1:7779/                      │
+│ Backends    1 registered                                │
+│ Body map    Not configured (warnings off)               │
+│ Sensations  5 loaded                                    │
+│ History     /Users/.../smited/history.db                │
+╰─────────────────────────────────────────────────────────╯
 ```
 
 Verify with `grpcurl` (install via `brew install grpcurl`):
@@ -56,6 +64,7 @@ See [`docs/building.md`](docs/building.md) for the full Cake target list.
 - [`docs/body-map.md`](docs/body-map.md) — bodymap framework, region taxonomy, and forbidden-region semantics.
 - [`docs/owo.md`](docs/owo.md) — Windows OWO Skin setup, calibration, smoke-test runbook, TENS safety notes.
 - [`docs/history.md`](docs/history.md) — the daemon's SQLite history database: tables, queries, retention.
+- [`docs/admin.md`](docs/admin.md) — the in-process Blazor Server admin UI on port 7779 (smoke-test surface).
 - [`sensations/README.md`](sensations/README.md) — sensation file format reference.
 
 ## Status

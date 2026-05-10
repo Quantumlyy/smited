@@ -28,6 +28,13 @@ internal static class StartupBanner
             "[aquamarine1]Panic[/]",
             $"[red1]POST http://{options.BindAddress}:{options.PanicPort}/panic[/]");
 
+        if (options.Admin.Enabled)
+        {
+            grid.AddRow(
+                "[aquamarine1]Admin[/]",
+                $"[gold1]http://{options.Admin.BindAddress}:{options.Admin.Port}/[/]");
+        }
+
         grid.AddRow("[aquamarine1]Backends[/]", $"[gold1]{backendCount} registered[/]");
 
         grid.AddRow("[aquamarine1]Body map[/]", FormatBodyMap(bodyMapState));
