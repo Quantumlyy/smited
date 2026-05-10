@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RootNamespace>Smited.Daemon.Owo</RootNamespace>
+    <AssemblyName>Smited.Daemon.Owo</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!--
+    The Windows project references the abstractions project (NOT the
+    daemon host) so the build graph stays acyclic. The daemon imports
+    IHapticBackend from the same Abstractions assembly and loads
+    OwoBackend via Type.GetType reflection at runtime.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!--
+    OWO is a Windows-native NuGet package; only restore on Windows hosts
+    so `dotnet build` on Mac produces an empty assembly without trying to
+    pull a package that won't load on non-Windows runtimes. Version is
+    centrally managed in Directory.Packages.props.
+  -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <PackageReference Include="OWO" />
+  </ItemGroup>
+
+  <!--
+    The OwoBackend body uses OWO SDK types unconditionally inside
+    `#if WINDOWS`. Targeting `net9.0-windows` means the WINDOWS symbol
+    is defined regardless of build host, so we exclude the file from
+    compile when building on a non-Windows host where the OWO package
+    isn't restored.
+  -->
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+    <Compile Remove="OwoBackend.cs" />
+  </ItemGroup>
+
+</Project>

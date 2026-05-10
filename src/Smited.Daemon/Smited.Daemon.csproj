@@ -1,0 +1,89 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Smited.Daemon</RootNamespace>
+    <AssemblyName>Smited.Daemon</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      IHapticBackend, the internal trigger/stop/event records, and the
+      generated proto code all live in Smited.Daemon.Abstractions so
+      backend assemblies (including platform-conditional ones like
+      Smited.Daemon.Owo) can implement the interface without a
+      compile-time dependency on the daemon host.
+    -->
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <!--
+      Grpc.AspNetCore pulls Grpc.Tools transitively, which would otherwise
+      auto-compile any .proto files in the project. We don't ship .proto;
+      excluding `build` assets disables that MSBuild pipeline so it can't
+      collide with the pre-generated code in Smited.Daemon.Abstractions.
+    -->
+    <PackageReference Include="Grpc.AspNetCore">
+      <ExcludeAssets>build</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
+    <PackageReference Include="ProtoValidate" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+    <!-- NSubstitute's DynamicProxy needs visibility into internal types
+         it's asked to substitute (e.g. IHistoryRecorder). -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <!--
+    Windows-conditional reverse ProjectReference so the
+    Smited.Daemon.Owo assembly is built and copied into the daemon's
+    output directory whenever we're on Windows. ReferenceOutputAssembly
+    is false because daemon source never imports OwoBackend — the
+    BackendBootstrapper loads it via Type.GetType reflection at runtime.
+    No cycle: Smited.Daemon.Owo references Smited.Daemon.Abstractions,
+    not Smited.Daemon, so this reverse reference is the only edge
+    between the two.
+  -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <ProjectReference Include="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <OutputItemType>Content</OutputItemType>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Copy the repo's sensation library next to the binary so the daemon's
+    default `./sensations` LibraryRoot resolves to it regardless of where
+    `dotnet run` is invoked from.
+  -->
+  <ItemGroup>
+    <Content Include="..\..\sensations\**\*.json"
+             Link="sensations\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\sensations\README.md"
+             Link="sensations\README.md"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

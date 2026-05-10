@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Smited.Daemon</RootNamespace>
+    <AssemblyName>Smited.Daemon.Abstractions</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Generated proto C# is committed under gen/csharp/ for hermetic builds
+      and lives here (rather than in Smited.Daemon) so that backend
+      assemblies — including out-of-tree platform-conditional ones like
+      Smited.Daemon.Owo — can implement IHapticBackend without taking a
+      compile-time dependency on the daemon host.
+    -->
+    <Compile Include="..\..\gen\csharp\**\*.cs" LinkBase="Generated" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <!--
+      Grpc.AspNetCore brings the abstract SmitedServiceBase that the
+      generated gRPC code inherits from. ExcludeAssets=build keeps
+      Grpc.Tools' MSBuild proto pipeline out of the build.
+    -->
+    <PackageReference Include="Grpc.AspNetCore">
+      <ExcludeAssets>build</ExcludeAssets>
+    </PackageReference>
+    <!--
+      ProtoValidate ships the compiled `buf.validate.*` descriptors that
+      gen/csharp/Smited.cs references for its field-level validation
+      annotations. Without it the generated reflection code fails to
+      compile.
+    -->
+    <PackageReference Include="ProtoValidate" />
+  </ItemGroup>
+
+</Project>
