@@ -57,7 +57,14 @@ public class PishockBackendTests
     [Fact]
     public async Task TriggerAsync_calls_client_once_per_microsensation_in_a_sequence()
     {
-        var (backend, client, time) = NewBackend(new PishockBackendOptions { MaxBurst = 5 });
+        // LAN mode so the per-pulse playback stays in milliseconds and
+        // the test's PumpUntil budget covers the whole sequence.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            MaxBurst = 5,
+        });
         await using var __ = backend;
 
         var request = new BackendTriggerRequest(
@@ -131,6 +138,47 @@ public class PishockBackendTests
     {
         var (backend, _, _) = NewBackend();
         await backend.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TriggerAsync_in_cloud_mode_estimates_duration_rounded_up_to_seconds()
+    {
+        // The cloud API takes Duration in whole seconds (1..15). A 100ms
+        // authored vibrate fires for 1s on the device. If the backend
+        // uses the authored 100ms to time its concurrency-slot release,
+        // the slot frees while the device is still firing and a follow-up
+        // trigger overlaps the in-flight op. EstimatedDuration must
+        // reflect the wire reality so the coordinator's slot release
+        // matches.
+        var (backend, _, _) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Cloud,
+            Username = "u", ApiKey = "k", ShareCode = "s",
+        });
+        await using var __ = backend;
+
+        var result = await backend.TriggerAsync(
+            MakeRequest(PishockOp.Vibrate, durationMs: 100, intensity: 30),
+            CancellationToken.None);
+
+        result.EstimatedDuration.Should().Be(TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task TriggerAsync_in_lan_mode_keeps_authored_milliseconds_in_estimate()
+    {
+        var (backend, _, _) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+        });
+        await using var __ = backend;
+
+        var result = await backend.TriggerAsync(
+            MakeRequest(PishockOp.Vibrate, durationMs: 250, intensity: 30),
+            CancellationToken.None);
+
+        result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(250));
     }
 
     private static BackendTriggerRequest MakeRequest(PishockOp op, int durationMs, int intensity)

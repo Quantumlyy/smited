@@ -72,12 +72,13 @@ internal sealed class CloudPishockClient : IPishockClient
     public async Task<PishockOpResult> SendOpAsync(
         PishockOp op, int durationMs, int intensity, CancellationToken ct)
     {
-        // Cloud API takes Duration in whole seconds, range 1..15.
-        // Round UP from milliseconds — undershoot would silently fire a
-        // shorter op than the user authored, which is more surprising
-        // than firing a slightly longer one. The 200ms vibrate becomes
-        // 1s; the LAN transport is the answer for sub-second control.
-        var durationSeconds = Math.Max(1, (int)Math.Ceiling(durationMs / 1000.0));
+        // PishockDurationPolicy.Effective applies the same rounding the
+        // backend's playback timing uses, so the wire and the daemon's
+        // concurrency-slot release agree on how long the device is
+        // firing.
+        var effective = PishockDurationPolicy.Effective(
+            PishockTransportMode.Cloud, TimeSpan.FromMilliseconds(durationMs));
+        var durationSeconds = (int)effective.TotalSeconds;
 
         var body = new CloudOperateBody
         {

@@ -128,7 +128,7 @@ public sealed class MockPishockBackend : IHapticBackend
             }
         }
 
-        var estimated = MicrosensationReader.ComputeEstimatedDuration(request);
+        var estimated = MicrosensationReader.ComputeEstimatedDuration(request, _options.Mode);
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),

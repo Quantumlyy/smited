@@ -85,7 +85,12 @@ public class BundledPishockSensationsTests
             ClientTraceId: "_unused",
             Microsensations: micros);
 
-        var computed = MicrosensationReader.ComputeEstimatedDuration(request);
+        // Authored estimated_duration is transport-agnostic — it reflects
+        // the millisecond intent in the file. Use LAN mode so the helper
+        // returns ms-precise sums without applying cloud's whole-second
+        // rounding.
+        var computed = MicrosensationReader.ComputeEstimatedDuration(
+            request, PishockTransportMode.Lan);
 
         // The authored estimated_duration drives admin-UI countdown
         // displays and the daemon's history-row "expected" column.

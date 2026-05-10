@@ -266,7 +266,15 @@ public class MockPishockBackendTests
     [Fact]
     public async Task TriggerAsync_emits_Started_then_Completed_after_duration()
     {
-        var backend = NewBackend(out var time);
+        // LAN mode preserves millisecond timing on the wire; Cloud
+        // would round 500ms up to 1s and the test would observe 1s
+        // instead of 500ms. The cloud-rounding case is covered by
+        // the dedicated test below.
+        var backend = NewBackend(out var time, new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+        });
         await using var __ = backend;
 
         var request = MakeRequest(PishockOp.Vibrate, durationMs: 500, intensity: 30);
@@ -285,7 +293,11 @@ public class MockPishockBackendTests
     [Fact]
     public async Task Sequence_of_microsensations_sums_durations_plus_delay_before()
     {
-        var backend = NewBackend(out _);
+        var backend = NewBackend(out _, new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+        });
         await using var __ = backend;
 
         var request = MakeSequenceRequest(
@@ -295,8 +307,29 @@ public class MockPishockBackendTests
 
         var result = await backend.TriggerAsync(request, CancellationToken.None);
 
-        // 100 + (200+100) + (200+100) = 700ms
+        // 100 + (200+100) + (200+100) = 700ms (LAN, no rounding)
         result.EstimatedDuration.Should().Be(TimeSpan.FromMilliseconds(700));
+    }
+
+    [Fact]
+    public async Task TriggerAsync_in_cloud_mode_rounds_estimated_duration_up_to_seconds()
+    {
+        // Mock simulates the wire reality so behavior is consistent
+        // with the real backend on the same options. A 100ms cloud
+        // vibrate is reported as a 1s sensation because that's how
+        // long the device fires for.
+        var backend = NewBackend(out _, new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Cloud,
+            Username = "u", ApiKey = "k", ShareCode = "s",
+        });
+        await using var __ = backend;
+
+        var result = await backend.TriggerAsync(
+            MakeRequest(PishockOp.Vibrate, durationMs: 100, intensity: 30),
+            CancellationToken.None);
+
+        result.EstimatedDuration.Should().Be(TimeSpan.FromSeconds(1));
     }
 
     [Fact]

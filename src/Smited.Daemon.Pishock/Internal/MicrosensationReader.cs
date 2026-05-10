@@ -31,12 +31,14 @@ internal static class MicrosensationReader
     public static TimeSpan ReadDuration(MicrosensationParameters micro, string key) =>
         micro.Values.TryGetValue(key, out var v) && v is ParameterValue.Duration d ? d.Value : TimeSpan.Zero;
 
-    public static TimeSpan ComputeEstimatedDuration(BackendTriggerRequest request)
+    public static TimeSpan ComputeEstimatedDuration(
+        BackendTriggerRequest request, PishockTransportMode mode)
     {
         var total = TimeSpan.Zero;
         foreach (var micro in request.Microsensations)
         {
-            total += ReadDuration(micro, "delay_before") + ReadDuration(micro, "duration");
+            total += ReadDuration(micro, "delay_before")
+                + PishockDurationPolicy.Effective(mode, ReadDuration(micro, "duration"));
         }
         return total;
     }

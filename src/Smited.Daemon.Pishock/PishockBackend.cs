@@ -117,7 +117,7 @@ public sealed class PishockBackend : IHapticBackend
             }
         }
 
-        var estimated = MicrosensationReader.ComputeEstimatedDuration(request);
+        var estimated = MicrosensationReader.ComputeEstimatedDuration(request, _options.Mode);
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),
@@ -169,13 +169,17 @@ public sealed class PishockBackend : IHapticBackend
                         result.ErrorMessage ?? "(no message)");
                 }
 
-                if (duration > TimeSpan.Zero)
+                // Wait the EFFECTIVE duration — what the device is
+                // actually firing for over the wire. Cloud rounds
+                // sub-second authored values up to whole seconds; LAN
+                // passes milliseconds through. Using the authored
+                // duration here would free the concurrency slot before
+                // the cloud device finished firing, allowing overlap
+                // on supposedly single-channel hardware.
+                var effective = PishockDurationPolicy.Effective(_options.Mode, duration);
+                if (effective > TimeSpan.Zero)
                 {
-                    // PiShock has no completion callback, so the daemon
-                    // waits the authored duration before considering this
-                    // pulse "done." If the device finished early or
-                    // late, the daemon won't know.
-                    await Task.Delay(duration, _time, ct).ConfigureAwait(false);
+                    await Task.Delay(effective, _time, ct).ConfigureAwait(false);
                 }
             }
 
