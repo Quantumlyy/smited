@@ -2,14 +2,14 @@
 
   <PropertyGroup>
     <!--
-      Target net9.0-windows on Windows so the project can take a
-      ProjectReference to the Windows-only Smited.Daemon.Owo (which
-      itself targets net9.0-windows) without NU1201. On Mac/Linux we
-      stay on plain net9.0; OWO-specific test files are excluded
-      below so the smaller TFM is enough.
+      Target net9.0-windows when targeting Windows (host or cross-build
+      via win-* RID) so the project can take a ProjectReference to the
+      Windows-only Smited.Daemon.Owo without NU1201. Otherwise stay on
+      plain net9.0; OWO-specific test files are excluded below so the
+      smaller TFM is enough.
     -->
-    <TargetFramework Condition="'$(OS)' == 'Windows_NT'">net9.0-windows</TargetFramework>
-    <TargetFramework Condition="'$(OS)' != 'Windows_NT'">net9.0</TargetFramework>
+    <TargetFramework Condition="'$(_TargetingWindows)' == 'true'">net9.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(_TargetingWindows)' != 'true'">net9.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
@@ -37,18 +37,19 @@
   </ItemGroup>
 
   <!--
-    On Windows we additionally take a direct compile-time reference to the
-    OWO backend so test files can construct OwoBackend and resolve OwoMuscleMap
-    at compile time. The daemon project's own reference to the OWO project
-    sets ReferenceOutputAssembly=false (it loads the assembly reflectively)
-    so test code can't see OwoBackend types transitively. Mac builds drop
-    both the reference and the OWO-specific test files.
+    When targeting Windows we additionally take a direct compile-time
+    reference to the OWO backend so test files can construct OwoBackend
+    and resolve OwoMuscleMap at compile time. The daemon project's own
+    reference to the OWO project sets ReferenceOutputAssembly=false (it
+    loads the assembly reflectively) so test code can't see OwoBackend
+    types transitively. Non-Windows builds drop both the reference and
+    the OWO-specific test files.
   -->
-  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+  <ItemGroup Condition="'$(_TargetingWindows)' == 'true'">
     <ProjectReference Include="..\..\src\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+  <ItemGroup Condition="'$(_TargetingWindows)' != 'true'">
     <Compile Remove="Backends\OwoBackendLifecycleTests.cs" />
     <Compile Remove="Backends\OwoBackendTests.cs" />
     <Compile Remove="Backends\OwoMuscleMapTests.cs" />

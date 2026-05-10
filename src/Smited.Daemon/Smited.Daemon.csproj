@@ -7,6 +7,19 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
+  <!--
+    When the daemon is being built/published targeting Windows (host or
+    cross-publish via -r win-x64), MSBuild has to walk into the
+    net9.0-windows OWO csproj. From a non-Windows host that requires
+    EnableWindowsTargeting=true so the desktop SDK doesn't refuse to
+    load. Setting it on the daemon project propagates down to the OWO
+    ProjectReference; gating it on _TargetingWindows keeps non-Windows
+    publishes (osx-arm64, linux-x64) clean.
+  -->
+  <PropertyGroup Condition="'$(_TargetingWindows)' == 'true'">
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
   <ItemGroup>
     <!--
       IHapticBackend, the internal trigger/stop/event records, and the
@@ -59,7 +72,7 @@
     not Smited.Daemon, so this reverse reference is the only edge
     between the two.
   -->
-  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+  <ItemGroup Condition="'$(_TargetingWindows)' == 'true'">
     <ProjectReference Include="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj">
       <!--
         ReferenceOutputAssembly=false keeps OWO's types out of the
@@ -67,8 +80,8 @@
         reflectively). SkipGetTargetFrameworkProperties=true bypasses
         the TFM compatibility check between net9.0 here and
         net9.0-windows there. Output copying is handled by the
-        CopyOwoBackendRuntime target below — Content/CopyToOutput on
-        the ProjectReference would only carry the project's primary
+        ResolveOwoBackendRuntime target below — Content/CopyToOutput
+        on the ProjectReference would only carry the project's primary
         DLL, missing the OWO NuGet runtime assembly.
       -->
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -99,35 +112,32 @@
   -->
   <Target Name="ResolveOwoBackendRuntime"
           BeforeTargets="AssignTargetPaths"
-          Condition="'$(OS)' == 'Windows_NT' and '$(_OwoBackendRuntimeResolved)' != 'true'">
+          Condition="'$(_TargetingWindows)' == 'true' and '$(_OwoBackendRuntimeResolved)' != 'true'">
     <!--
       Build the OWO project first and then ask it for its TargetPath.
 
-      Two subtleties to keep in mind:
+      ReferenceOutputAssembly=false on the ProjectReference triggers a
+      Build during a normal `dotnet build`, but the publish chain
+      reaches AssignTargetPaths before that build runs in some
+      configurations (Release + -r win-x64). An explicit <MSBuild>
+      invocation here makes the dependency unambiguous.
 
-      * ReferenceOutputAssembly=false on the ProjectReference triggers
-        a Build during a normal `dotnet build`, but the publish chain
-        reaches AssignTargetPaths before that build runs in some
-        configurations (Release + -r win-x64). An explicit <MSBuild>
-        invocation here makes the dependency unambiguous.
-
-      * RuntimeIdentifier= (empty) is passed deliberately so the OWO
-        project's bin folder doesn't fork into a RID-specific
-        subdirectory when the daemon is published self-contained. The
-        OWO assembly is fully managed; it doesn't need a RID-specific
-        layout, and a uniform path makes the Content metadata below
-        portable across `dotnet build` and every flavour of
-        `dotnet publish`.
+      We deliberately let `Configuration` and `RuntimeIdentifier`
+      propagate (no clearing). Forcing RuntimeIdentifier= empty would
+      flip _TargetingWindows back to false inside the OWO csproj on a
+      cross-publish from Mac/Linux — which would suppress
+      CopyLocalLockFileAssemblies and the OWO NuGet PackageReference,
+      leaving OWO.dll out of the bin folder and breaking the runtime.
 
       GetTargetPath returns the project's primary output assembly, so
       its directory IS the bin folder we want — no string interpolation
       against MSBuild conventions that may shift across SDK versions.
     -->
     <MSBuild Projects="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier="
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier)"
              Targets="Build" />
     <MSBuild Projects="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier="
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier)"
              Targets="GetTargetPath">
       <Output TaskParameter="TargetOutputs" ItemName="_OwoTargetPathItem" />
     </MSBuild>

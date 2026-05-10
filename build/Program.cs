@@ -3,6 +3,7 @@ using Cake.Common.Diagnostics;
 using Cake.Common.IO;
 using Cake.Common.Tools.DotNet;
 using Cake.Common.Tools.DotNet.Build;
+using Cake.Common.Tools.DotNet.MSBuild;
 using Cake.Common.Tools.DotNet.Publish;
 using Cake.Common.Tools.DotNet.Test;
 using Cake.Core;
@@ -76,7 +77,7 @@ public sealed class PublishLinuxTask : FrostingTask<BuildContext>
 {
     public override void Run(BuildContext ctx) => Publish(ctx, "linux-x64");
 
-    public static void Publish(BuildContext ctx, string rid) =>
+    public static void Publish(BuildContext ctx, string rid, DotNetMSBuildSettings? msbuild = null) =>
         ctx.DotNetPublish(ctx.DaemonProject, new DotNetPublishSettings
         {
             Configuration = ctx.BuildConfiguration,
@@ -84,6 +85,7 @@ public sealed class PublishLinuxTask : FrostingTask<BuildContext>
             SelfContained = true,
             PublishSingleFile = true,
             OutputDirectory = $"{ctx.ArtifactsDir}/{rid}",
+            MSBuildSettings = msbuild,
         });
 }
 
@@ -91,7 +93,16 @@ public sealed class PublishLinuxTask : FrostingTask<BuildContext>
 [IsDependentOn(typeof(BuildTask))]
 public sealed class PublishWinTask : FrostingTask<BuildContext>
 {
-    public override void Run(BuildContext ctx) => PublishLinuxTask.Publish(ctx, "win-x64");
+    // EnableWindowsTargeting=true is already set in
+    // src/Smited.Daemon/Smited.Daemon.csproj via the _TargetingWindows
+    // gate, but passing it here makes the cross-build intent obvious in
+    // the build script — anyone reading the Cake task sees that this
+    // task can run from non-Windows hosts (CI Linux, dev Macs).
+    public override void Run(BuildContext ctx) =>
+        PublishLinuxTask.Publish(
+            ctx,
+            "win-x64",
+            new DotNetMSBuildSettings().WithProperty("EnableWindowsTargeting", "true"));
 }
 
 [TaskName("Publish-OSX-arm64")]
