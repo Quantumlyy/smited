@@ -6,12 +6,14 @@
 // we additionally guard the file body with `#if WINDOWS`).
 
 #if WINDOWS
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
 using Smited.V1;
+using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 
 namespace Smited.Daemon.Owo;
 
@@ -51,6 +53,8 @@ public sealed class OwoBackend : IHapticBackend
             SingleReader = true,
             SingleWriter = false,
         });
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSensations =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Constructed by the daemon's <c>BackendBootstrapper</c> via
@@ -183,14 +187,162 @@ public sealed class OwoBackend : IHapticBackend
 
     /// <inheritdoc />
     public Task<BackendTriggerResult> TriggerAsync(
-        BackendTriggerRequest request, CancellationToken ct) =>
-        throw new NotSupportedException(
-            "TriggerAsync is wired in commit O3 via SensationsFactory.");
+        BackendTriggerRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (Status != BackendStatus.Ready)
+        {
+            throw new InvalidOperationException(
+                $"OWO backend {Id} status is {Status}, cannot trigger");
+        }
+
+        var totalDuration = ComputeEstimatedDuration(request);
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        // Stash the CTS keyed by sensation id so StopAsync can target a
+        // specific in-flight sensation. OWO's exclusive concurrency means
+        // there will only be at most one entry here at a time given the
+        // Concurrency.Policy=CANCEL_OLDEST upstream enforcement, but we
+        // still key by id for symmetry with the mock backend.
+        _activeSensations[request.SensationId] = linked;
+
+        EmitEvent(new SensationStarted(
+            Id,
+            _time.GetUtcNow(),
+            request.SensationId,
+            request.SensationName,
+            request.ClientTraceId));
+
+        _logger.LogInformation(
+            "OWO backend {Id} firing {SensationId} ({SensationName}) on {Zones} for {Duration}",
+            Id,
+            request.SensationId,
+            request.SensationName ?? "<inline>",
+            string.Join(",", request.ZoneIds),
+            totalDuration);
+
+        // Pre-register the total-duration timer synchronously so
+        // FakeTimeProvider tests that advance time after TriggerAsync
+        // returns observe a deterministic completion. The microsensation
+        // dispatch loop runs on the thread pool and may register
+        // additional inter-send timers; tests that need to drive
+        // multi-microsensation playback step-by-step pump time more than
+        // once.
+        var totalDelay = totalDuration > TimeSpan.Zero
+            ? Task.Delay(totalDuration, _time, linked.Token)
+            : Task.CompletedTask;
+
+        _ = Task.Run(async () =>
+        {
+            BackendEvent finalEvent;
+            try
+            {
+                for (var i = 0; i < request.Microsensations.Count; i++)
+                {
+                    var micro = request.Microsensations[i];
+                    var command = BuildSendCommand(micro, request);
+                    _sdk.Send(command);
+
+                    if (i < request.Microsensations.Count - 1)
+                    {
+                        var thisDuration = ResolveMicroDuration(micro);
+                        if (thisDuration > TimeSpan.Zero)
+                        {
+                            await Task.Delay(thisDuration, _time, linked.Token).ConfigureAwait(false);
+                        }
+                    }
+                }
+
+                await totalDelay.ConfigureAwait(false);
+
+                finalEvent = new SensationCompleted(
+                    Id,
+                    _time.GetUtcNow(),
+                    request.SensationId,
+                    request.SensationName,
+                    request.ClientTraceId);
+            }
+            catch (OperationCanceledException)
+            {
+                finalEvent = new SensationCancelled(
+                    Id,
+                    _time.GetUtcNow(),
+                    request.SensationId,
+                    request.SensationName,
+                    request.ClientTraceId,
+                    Reason: "stopped");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "OWO sensation {SensationId} failed mid-flight",
+                    request.SensationId);
+                finalEvent = new SensationCancelled(
+                    Id,
+                    _time.GetUtcNow(),
+                    request.SensationId,
+                    request.SensationName,
+                    request.ClientTraceId,
+                    Reason: $"error: {ex.Message}");
+            }
+            finally
+            {
+                _activeSensations.TryRemove(request.SensationId, out _);
+                linked.Dispose();
+            }
+
+            EmitEvent(finalEvent);
+        }, ct);
+
+        return Task.FromResult(new BackendTriggerResult(request.SensationId, totalDuration));
+    }
 
     /// <inheritdoc />
-    public Task<int> StopAsync(BackendStopRequest request, CancellationToken ct) =>
-        throw new NotSupportedException(
-            "StopAsync is wired in commit O3 against OWO.Stop().");
+    public Task<int> StopAsync(BackendStopRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var stopped = 0;
+
+        if (request.All)
+        {
+            foreach (var (id, cts) in _activeSensations)
+            {
+                if (_activeSensations.TryRemove(id, out var removed))
+                {
+                    SafeCancel(removed);
+                    stopped++;
+                }
+            }
+        }
+        else if (!string.IsNullOrEmpty(request.SensationId)
+            && _activeSensations.TryRemove(request.SensationId, out var cts))
+        {
+            SafeCancel(cts);
+            stopped = 1;
+        }
+
+        // Always tell the SDK to silence the device. OWO's Stop() is a
+        // global cancel of whatever's playing right now; given the
+        // exclusive concurrency model this is the correct semantic for
+        // both per-id and All stops.
+        if (stopped > 0)
+        {
+            try
+            {
+                _sdk.Stop();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "OWO SDK Stop() threw while cancelling sensations; "
+                    + "the in-process tracking has already been cleared");
+            }
+        }
+
+        return Task.FromResult(stopped);
+    }
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() =>
@@ -298,5 +450,88 @@ public sealed class OwoBackend : IHapticBackend
             Max = max,
             Description = description,
         };
+
+    private void EmitEvent(BackendEvent evt)
+    {
+        if (!_events.Writer.TryWrite(evt))
+        {
+            _logger.LogWarning(
+                "OWO backend {Id} dropped event {EventType}: channel full",
+                Id, evt.GetType().Name);
+        }
+    }
+
+    private static void SafeCancel(CancellationTokenSource cts)
+    {
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private OwoSendCommand BuildSendCommand(
+        MicrosensationParameters micro, BackendTriggerRequest request)
+    {
+        var frequency = ReadNumber(micro, "frequency", defaultValue: 100);
+        var duration = (float)ReadDuration(micro, "duration").TotalSeconds;
+        var rampUp = (float)ReadDuration(micro, "ramp_up").TotalSeconds;
+        var rampDown = (float)ReadDuration(micro, "ramp_down").TotalSeconds;
+        var exitDelay = (float)ReadDuration(micro, "exit_delay").TotalSeconds;
+        var intensity = ReadNumber(micro, "intensity", defaultValue: 50);
+
+        // request.IntensityScale is a 0..100 multiplier applied at trigger
+        // time (e.g. global "turn the daemon down" knob). Apply it as a
+        // percentage and clamp to the OWO SDK's accepted range.
+        if (request.IntensityScale.HasValue)
+        {
+            intensity = intensity * request.IntensityScale.Value / 100.0;
+        }
+        intensity = Math.Clamp(intensity, 0, 100);
+
+        return new OwoSendCommand(
+            FrequencyHz: (float)frequency,
+            DurationSeconds: duration,
+            IntensityPercentage: (float)intensity,
+            RampUpSeconds: rampUp,
+            RampDownSeconds: rampDown,
+            ExitDelaySeconds: exitDelay,
+            ZoneIds: request.ZoneIds);
+    }
+
+    private static TimeSpan ComputeEstimatedDuration(BackendTriggerRequest request)
+    {
+        // Microsensations play sequentially, not in parallel — sum the
+        // per-step durations (active stim + envelope) so the full
+        // sensation lasts the same wall-clock time as the file's declared
+        // estimated_duration. Identical to MockOwoBackend so authored
+        // sensations have the same total runtime on both backends.
+        var total = TimeSpan.Zero;
+        foreach (var micro in request.Microsensations)
+        {
+            total += ReadDuration(micro, "duration")
+                + ReadDuration(micro, "ramp_up")
+                + ReadDuration(micro, "ramp_down")
+                + ReadDuration(micro, "exit_delay");
+        }
+        return total;
+    }
+
+    private static TimeSpan ResolveMicroDuration(MicrosensationParameters micro) =>
+        ReadDuration(micro, "duration")
+        + ReadDuration(micro, "ramp_up")
+        + ReadDuration(micro, "ramp_down")
+        + ReadDuration(micro, "exit_delay");
+
+    private static TimeSpan ReadDuration(MicrosensationParameters micro, string key) =>
+        micro.Values.TryGetValue(key, out var v) && v is ParameterValue.Duration d
+            ? d.Value
+            : TimeSpan.Zero;
+
+    private static double ReadNumber(
+        MicrosensationParameters micro, string key, double defaultValue) =>
+        micro.Values.TryGetValue(key, out var v) && v is ParameterValue.Number n
+            ? n.Value
+            : defaultValue;
 }
 #endif

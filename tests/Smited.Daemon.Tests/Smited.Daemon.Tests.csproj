@@ -28,4 +28,21 @@
     <ProjectReference Include="..\..\src\Smited.Daemon\Smited.Daemon.csproj" />
   </ItemGroup>
 
+  <!--
+    On Windows we additionally take a direct compile-time reference to the
+    OWO backend so test files can construct OwoBackend and resolve OwoMuscleMap
+    at compile time. The daemon project's own reference to the OWO project
+    sets ReferenceOutputAssembly=false (it loads the assembly reflectively)
+    so test code can't see OwoBackend types transitively. Mac builds drop
+    both the reference and the OWO-specific test files.
+  -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <ProjectReference Include="..\..\src\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+    <Compile Remove="Backends\OwoBackendTests.cs" />
+    <Compile Remove="Backends\OwoMuscleMapTests.cs" />
+  </ItemGroup>
+
 </Project>

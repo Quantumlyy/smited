@@ -43,10 +43,22 @@ public sealed class StaticOwoSdk : IOwoSdk
     public bool IsConnected => OWO.IsConnected;
 
     /// <inheritdoc />
-    public void Send(OwoSendCommand command) =>
-        throw new NotSupportedException(
-            "StaticOwoSdk.Send is wired in commit O3 alongside OwoMuscleMap "
-            + "and OwoBackend.TriggerAsync.");
+    public void Send(OwoSendCommand command)
+    {
+        // SDK signature (v2.4.x): SensationsFactory.Create takes all
+        // floats — frequency in Hz, duration/exitDelay in seconds,
+        // intensity as a 0..100 percentage, ramps in seconds.
+        var sensation = SensationsFactory.Create(
+            frequency: command.FrequencyHz,
+            duration: command.DurationSeconds,
+            intensity: command.IntensityPercentage,
+            rampUp: command.RampUpSeconds,
+            rampDown: command.RampDownSeconds,
+            exitDelay: command.ExitDelaySeconds);
+
+        var muscles = OwoMuscleMap.Resolve(command.ZoneIds);
+        OWO.Send(sensation.WithMuscles(muscles));
+    }
 
     /// <inheritdoc />
     public void Stop() => OWO.Stop();

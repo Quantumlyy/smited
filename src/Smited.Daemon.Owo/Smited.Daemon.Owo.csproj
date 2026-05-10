@@ -39,6 +39,7 @@
   -->
   <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
     <Compile Remove="OwoBackend.cs" />
+    <Compile Remove="OwoMuscleMap.cs" />
     <Compile Remove="StaticOwoSdk.cs" />
   </ItemGroup>
 
