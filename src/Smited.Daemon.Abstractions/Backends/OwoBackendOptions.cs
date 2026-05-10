@@ -11,9 +11,16 @@ namespace Smited.Daemon.Backends;
 /// exposes it via the <c>Smited.Daemon.Configuration.SmitedOptions</c>
 /// tree) and the platform-conditional OWO backend project can reference
 /// the type without forcing a Mac-side ProjectReference to the Windows
-/// backend assembly. Mac builds compile this file as part of the
-/// abstractions assembly; only the OWO project's <c>OwoBackend.cs</c>
-/// is gated behind <c>$(OS) == Windows_NT</c>.
+/// backend assembly. This file compiles into the abstractions assembly
+/// on every host; the OWO project's SDK-touching files
+/// (<c>OwoBackend.cs</c>, <c>StaticOwoSdk.cs</c>, <c>OwoMuscleMap.cs</c>)
+/// are gated on the <c>_TargetingWindows</c> MSBuild property defined
+/// in <c>Directory.Build.props</c>, which evaluates true when either
+/// the host is Windows or the build was given a <c>win-*</c>
+/// <c>RuntimeIdentifier</c> (i.e. cross-publish). Their bodies are
+/// additionally wrapped in <c>#if WINDOWS</c> for IDE clarity. See
+/// <c>docs/adding-a-backend.md</c> for the full conditional-reference
+/// pattern any new platform-specific backend should follow.
 /// </remarks>
 public sealed class OwoBackendOptions
 {
