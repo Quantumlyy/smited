@@ -140,16 +140,25 @@ internal sealed class BodyMapState : IBodyMapState
                     continue;
                 }
 
-                if (!BackendsByRegion.TryGetValue(region, out var backendsHere))
+                // Walk the inverse index and return the first other
+                // backend whose declared region overlaps the trigger
+                // zone's region. RegionHierarchy.Overlaps is symmetric
+                // so a trigger on ChestFront finds another backend in
+                // ChestOverHeart and vice-versa — without the index
+                // having to pre-expand parent/child closures.
+                foreach (var (otherRegion, backendsHere) in BackendsByRegion)
                 {
-                    continue;
-                }
-
-                foreach (var otherId in backendsHere)
-                {
-                    if (!string.Equals(otherId, backend.Id, StringComparison.OrdinalIgnoreCase))
+                    if (!RegionHierarchy.Overlaps(region, otherRegion))
                     {
-                        return new OverlapHit(region, otherId, leaf);
+                        continue;
+                    }
+
+                    foreach (var otherId in backendsHere)
+                    {
+                        if (!string.Equals(otherId, backend.Id, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return new OverlapHit(otherRegion, otherId, leaf);
+                        }
                     }
                 }
             }

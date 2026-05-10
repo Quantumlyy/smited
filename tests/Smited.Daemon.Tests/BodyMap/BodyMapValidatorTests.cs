@@ -159,6 +159,75 @@ public class BodyMapValidatorTests
     }
 
     [Fact]
+    public void Placement_in_ChestFront_fails_default_forbidden_check_for_ChestOverHeart()
+    {
+        // Regression for the cardiac-safety bypass. ChestOverHeart is in
+        // SmitedDefaultForbiddenRegions; ChestFront contains it. A
+        // placement declared in ChestFront overlaps ChestOverHeart and
+        // must trip the default forbidden check, even though the
+        // placement's region is the broader parent.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().Contain(e =>
+            e.Kind == BodyMapErrorKind.SmitedDefaultForbidden
+            && e.Region == BodyRegion.ChestOverHeart);
+    }
+
+    [Fact]
+    public void ChestFront_and_ChestOverHeart_placements_warn_as_overlap()
+    {
+        // Cross-backend overlap regression. backend-a in ChestFront,
+        // backend-b in ChestOverHeart — anatomically overlapping. The
+        // pre-fix code only matched identical regions, so this pair was
+        // silently treated as disjoint. With AllowOverrideRegions the
+        // smited-default error is suppressed so the test asserts the
+        // overlap-warning shape in isolation.
+        var a = MakeFake("backend-a", zones: ["pectoral_l"]);
+        var b = MakeFake("backend-b", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            AllowOverrideRegions = { BodyRegion.ChestOverHeart },
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "backend-a",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+                new Placement
+                {
+                    BackendId = "backend-b",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestOverHeart,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { a, b }, options);
+
+        result.Warnings.Should().HaveCount(1);
+        result.Warnings.Should().ContainSingle(w =>
+            w.Region == BodyRegion.ChestFront || w.Region == BodyRegion.ChestOverHeart);
+    }
+
+    [Fact]
     public void Two_placements_in_same_region_emit_an_overlap_warning()
     {
         var a = MakeFake("a", zones: ["arm_l"]);

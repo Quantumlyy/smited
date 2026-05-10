@@ -7,49 +7,55 @@ namespace Smited.Daemon.Tests.BodyMap;
 public class RegionHierarchyTests
 {
     [Fact]
-    public void ChestOverHeart_includes_itself_and_ChestFront()
+    public void Same_region_overlaps_itself()
     {
-        RegionHierarchy.ContainingRegions(BodyRegion.ChestOverHeart)
-            .Should().BeEquivalentTo(new[]
-            {
-                BodyRegion.ChestOverHeart,
-                BodyRegion.ChestFront,
-            });
+        RegionHierarchy.Overlaps(BodyRegion.ChestFront, BodyRegion.ChestFront)
+            .Should().BeTrue();
     }
 
     [Fact]
-    public void ChestFront_returns_only_itself()
+    public void Parent_overlaps_child()
     {
-        RegionHierarchy.ContainingRegions(BodyRegion.ChestFront)
-            .Should().BeEquivalentTo(new[] { BodyRegion.ChestFront });
+        RegionHierarchy.Overlaps(BodyRegion.ChestFront, BodyRegion.ChestOverHeart)
+            .Should().BeTrue();
     }
 
     [Fact]
-    public void Unspecified_returns_only_itself()
+    public void Child_overlaps_parent()
     {
-        // Degenerate but stable: the validator treats Unspecified as
-        // "not in the body map," and ContainingRegions reflects that.
-        RegionHierarchy.ContainingRegions(BodyRegion.Unspecified)
-            .Should().BeEquivalentTo(new[] { BodyRegion.Unspecified });
+        // Symmetry: this is the case the previous one-directional
+        // ContainingRegions walker handled correctly. The new contract
+        // says child→parent and parent→child must both return true.
+        RegionHierarchy.Overlaps(BodyRegion.ChestOverHeart, BodyRegion.ChestFront)
+            .Should().BeTrue();
     }
 
     [Fact]
-    public void Leaf_regions_with_no_parents_return_only_themselves()
+    public void Unrelated_regions_do_not_overlap()
     {
-        // Sanity-check several leaves so a future hierarchy edit that
-        // accidentally pulls one of these into a parent is caught.
-        var leaves = new[]
-        {
-            BodyRegion.LeftWrist,
-            BodyRegion.RightHand,
-            BodyRegion.Glutes,
-            BodyRegion.LeftAnkle,
-            BodyRegion.BackLower,
-        };
+        RegionHierarchy.Overlaps(BodyRegion.ChestFront, BodyRegion.LeftThigh)
+            .Should().BeFalse();
+    }
 
-        foreach (var leaf in leaves)
-        {
-            RegionHierarchy.ContainingRegions(leaf).Should().BeEquivalentTo(new[] { leaf });
-        }
+    [Fact]
+    public void Sibling_subregions_do_not_overlap()
+    {
+        // No siblings exist in the hierarchy today; this asserts the
+        // shape so a future change that accidentally pairs unrelated
+        // regions fails loudly rather than silently broadening
+        // forbidden-region enforcement.
+        RegionHierarchy.Overlaps(BodyRegion.LeftHand, BodyRegion.RightHand)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void Unspecified_overlaps_only_itself()
+    {
+        RegionHierarchy.Overlaps(BodyRegion.Unspecified, BodyRegion.Unspecified)
+            .Should().BeTrue();
+        RegionHierarchy.Overlaps(BodyRegion.Unspecified, BodyRegion.ChestFront)
+            .Should().BeFalse();
+        RegionHierarchy.Overlaps(BodyRegion.ChestFront, BodyRegion.Unspecified)
+            .Should().BeFalse();
     }
 }

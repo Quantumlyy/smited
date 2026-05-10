@@ -67,19 +67,24 @@ public class BodyMapOverlapTests
 
     private static DaemonFixture NewFixture(string policy)
     {
-        // mock-owo's pectoral_l zone overlaps with a fake "overlap-buddy"
-        // backend's "z" zone in BodyRegion.ChestFront. The fake is
-        // injected via the IEnumerable<IHapticBackend> DI seam; bodymap
-        // placements are supplied via additionalConfig.
+        // mock-owo's arm_l zone overlaps with a fake "overlap-buddy"
+        // backend's "z" zone in BodyRegion.LeftUpperArm. LeftUpperArm
+        // is anatomically isolated from any of smited's default
+        // forbidden regions (Face / Throat / Pelvis / ChestOverHeart),
+        // so neither backend gets deregistered for forbidden-region
+        // reasons — the test exercises overlap policy semantics in
+        // isolation. The fake is injected via the
+        // IEnumerable<IHapticBackend> DI seam; bodymap placements are
+        // supplied via additionalConfig.
         var bodyMapConfig = new Dictionary<string, string?>
         {
             ["Smited:BodyMap:OverlapPolicy"] = policy,
             ["Smited:BodyMap:Placements:0:BackendId"] = "mock-owo",
-            ["Smited:BodyMap:Placements:0:ZoneIds:0"] = "pectoral_l",
-            ["Smited:BodyMap:Placements:0:Region"] = "ChestFront",
+            ["Smited:BodyMap:Placements:0:ZoneIds:0"] = "arm_l",
+            ["Smited:BodyMap:Placements:0:Region"] = "LeftUpperArm",
             ["Smited:BodyMap:Placements:1:BackendId"] = "overlap-buddy",
             ["Smited:BodyMap:Placements:1:ZoneIds:0"] = "z",
-            ["Smited:BodyMap:Placements:1:Region"] = "ChestFront",
+            ["Smited:BodyMap:Placements:1:Region"] = "LeftUpperArm",
         };
 
         return new DaemonFixture(
@@ -102,8 +107,8 @@ public class BodyMapOverlapTests
           "name": "ping",
           "backend_kind": "owo_skin",
           "display_name": "Ping",
-          "description": "Tiny tick on left pectoral.",
-          "default_zone_ids": ["pectoral_l"],
+          "description": "Tiny tick on left arm.",
+          "default_zone_ids": ["arm_l"],
           "default_intensity": 50,
           "estimated_duration": "0.05s",
           "definition": {

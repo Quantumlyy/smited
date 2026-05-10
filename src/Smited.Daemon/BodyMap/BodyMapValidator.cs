@@ -33,11 +33,11 @@ internal sealed class BodyMapValidator
         var backendById = backends.ToDictionary(
             b => b.Id, StringComparer.OrdinalIgnoreCase);
 
-        // regionsByBackend[backendId] = set of regions that backend covers.
-        // Built by walking every placement: each placement contributes
-        // its declared region to the set, and the parent regions
-        // (RegionHierarchy.ContainingRegions) follow because a forbidden
-        // ChestFront should also cover ChestOverHeart.
+        // regionsByBackend[backendId] = direct placement-declared regions
+        // for that backend. NOT expanded with parent/child closures —
+        // RegionHierarchy.Overlaps handles intersection at query time,
+        // so the index stays a faithful record of what the user actually
+        // declared.
         var regionsByBackend = new Dictionary<string, HashSet<BodyRegion>>(
             StringComparer.OrdinalIgnoreCase);
 
@@ -108,42 +108,58 @@ internal sealed class BodyMapValidator
                 }
             }
 
-            // For each leaf zone, run the forbidden-region checks
-            // (manufacturer first, smited-default second), walking
-            // up the region hierarchy so subregion declarations
-            // inherit parent forbiddenness.
-            var containing = RegionHierarchy.ContainingRegions(placement.Region);
+            // For each leaf zone, run the forbidden-region checks. Walk
+            // the FORBIDDEN regions and ask whether the placement's
+            // region overlaps each — symmetric so a placement on a
+            // parent (ChestFront) trips a forbidden child (ChestOverHeart)
+            // and vice-versa. Manufacturer first (non-overridable),
+            // smited-default second.
             foreach (var zone in resolvedLeafZones)
             {
-                foreach (var ancestor in containing)
+                BodyRegion? citedManufacturer = null;
+                foreach (var forbidden in backend.ForbiddenRegions)
                 {
-                    if (backend.ForbiddenRegions.Contains(ancestor))
+                    if (RegionHierarchy.Overlaps(placement.Region, forbidden))
                     {
-                        errors.Add(new BodyMapError(
-                            backend.Id,
-                            zone,
-                            placement.Region,
-                            BodyMapErrorKind.ManufacturerForbidden,
-                            $"Placement of zone '{zone}' on backend '{backend.Id}' "
-                            + $"in region '{placement.Region}' violates the backend's "
-                            + $"manufacturer forbidden region '{ancestor}'."));
-                        // First match wins; no point flagging
-                        // ancestor + descendant of the same chain.
+                        citedManufacturer = forbidden;
                         break;
                     }
-                    if (smitedDefaults.Contains(ancestor))
+                }
+
+                if (citedManufacturer is BodyRegion mfBan)
+                {
+                    errors.Add(new BodyMapError(
+                        backend.Id,
+                        zone,
+                        mfBan,
+                        BodyMapErrorKind.ManufacturerForbidden,
+                        $"Placement of zone '{zone}' on backend '{backend.Id}' "
+                        + $"in region '{placement.Region}' overlaps the backend's "
+                        + $"manufacturer forbidden region '{mfBan}'."));
+                    continue;
+                }
+
+                BodyRegion? citedDefault = null;
+                foreach (var forbidden in smitedDefaults)
+                {
+                    if (RegionHierarchy.Overlaps(placement.Region, forbidden))
                     {
-                        errors.Add(new BodyMapError(
-                            backend.Id,
-                            zone,
-                            placement.Region,
-                            BodyMapErrorKind.SmitedDefaultForbidden,
-                            $"Placement of zone '{zone}' on backend '{backend.Id}' "
-                            + $"in region '{placement.Region}' lands in smited's default "
-                            + $"forbidden region '{ancestor}'. Add '{ancestor}' to "
-                            + "Smited:BodyMap:AllowOverrideRegions to opt out."));
+                        citedDefault = forbidden;
                         break;
                     }
+                }
+
+                if (citedDefault is BodyRegion defaultBan)
+                {
+                    errors.Add(new BodyMapError(
+                        backend.Id,
+                        zone,
+                        defaultBan,
+                        BodyMapErrorKind.SmitedDefaultForbidden,
+                        $"Placement of zone '{zone}' on backend '{backend.Id}' "
+                        + $"in region '{placement.Region}' overlaps smited's default "
+                        + $"forbidden region '{defaultBan}'. Add '{defaultBan}' to "
+                        + "Smited:BodyMap:AllowOverrideRegions to opt out."));
                 }
             }
 
@@ -156,10 +172,7 @@ internal sealed class BodyMapValidator
                 set = new HashSet<BodyRegion>();
                 regionsByBackend[backend.Id] = set;
             }
-            foreach (var ancestor in containing)
-            {
-                set.Add(ancestor);
-            }
+            set.Add(placement.Region);
 
             if (!zoneRegions.TryGetValue(backend.Id, out var zoneMap))
             {
@@ -173,8 +186,10 @@ internal sealed class BodyMapValidator
         }
 
         // Build the inverse index: region → set of backend ids that
-        // cover the region. Used both for warnings here and for
-        // trigger-time overlap rejection in BodyMapState.
+        // declared placements on that exact region. The trigger-time
+        // overlap check still walks via RegionHierarchy.Overlaps, so
+        // anatomical relationships (ChestFront ↔ ChestOverHeart) are
+        // resolved at query time.
         var backendsByRegion = new Dictionary<BodyRegion, HashSet<string>>();
         foreach (var (backendId, regions) in regionsByBackend)
         {
@@ -191,29 +206,7 @@ internal sealed class BodyMapValidator
 
         if (options.OverlapPolicy != OverlapPolicy.Off)
         {
-            foreach (var (region, backendIds) in backendsByRegion)
-            {
-                if (backendIds.Count <= 1)
-                {
-                    continue;
-                }
-
-                var overlapZones = backendIds
-                    .Select(id => (id, (IReadOnlyList<string>)
-                        options.Placements
-                            .Where(p => string.Equals(p.BackendId, id, StringComparison.OrdinalIgnoreCase)
-                                && RegionHierarchy.ContainingRegions(p.Region).Contains(region))
-                            .SelectMany(p => p.ZoneIds)
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToArray()))
-                    .ToList();
-
-                warnings.Add(new BodyMapWarning(
-                    region,
-                    overlapZones,
-                    $"Region '{region}' is covered by {backendIds.Count} backends: "
-                    + string.Join(", ", backendIds.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))));
-            }
+            warnings.AddRange(BuildOverlapWarnings(regionsByBackend, options.Placements));
         }
 
         return new BodyMapValidationResult(
@@ -232,4 +225,74 @@ internal sealed class BodyMapValidator
                     .ToImmutableDictionary(StringComparer.OrdinalIgnoreCase),
                 StringComparer.OrdinalIgnoreCase));
     }
+
+    private static IEnumerable<BodyMapWarning> BuildOverlapWarnings(
+        IReadOnlyDictionary<string, HashSet<BodyRegion>> regionsByBackend,
+        IReadOnlyList<Placement> placements)
+    {
+        // Pairwise scan over distinct (backend, region) declarations.
+        // Two placements warn if their regions overlap anatomically —
+        // same region, parent-of, or child-of. Emit one warning per
+        // overlapping region pair, deduped so ChestFront ↔
+        // ChestOverHeart yields a single entry rather than one per
+        // direction.
+        var declarations = regionsByBackend
+            .SelectMany(kv => kv.Value.Select(r => (BackendId: kv.Key, Region: r)))
+            .ToList();
+
+        var seen = new HashSet<(BodyRegion A, BodyRegion B, string IdA, string IdB)>();
+        var seenPairKeys = new HashSet<string>();
+
+        for (var i = 0; i < declarations.Count; i++)
+        {
+            for (var j = i + 1; j < declarations.Count; j++)
+            {
+                var (idA, regA) = declarations[i];
+                var (idB, regB) = declarations[j];
+                if (string.Equals(idA, idB, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                if (!RegionHierarchy.Overlaps(regA, regB))
+                {
+                    continue;
+                }
+
+                // De-dup by sorted (id, region) tuple so two backends
+                // that each placed two zones in the same region don't
+                // warn twice.
+                var sortedIds = string.CompareOrdinal(idA, idB) <= 0
+                    ? (idA, idB) : (idB, idA);
+                var sortedRegions = (int)regA <= (int)regB ? (regA, regB) : (regB, regA);
+                var key = $"{sortedIds.Item1}|{sortedIds.Item2}|{sortedRegions.Item1}|{sortedRegions.Item2}";
+                if (!seenPairKeys.Add(key))
+                {
+                    continue;
+                }
+
+                var zonesA = ZoneIdsFor(placements, idA, regA);
+                var zonesB = ZoneIdsFor(placements, idB, regB);
+
+                yield return new BodyMapWarning(
+                    regA,
+                    new[] { (idA, zonesA), (idB, zonesB) },
+                    regA == regB
+                        ? $"Region '{regA}' is covered by both '{idA}' and '{idB}'."
+                        : $"Regions '{regA}' (on '{idA}') and '{regB}' (on '{idB}') "
+                          + "overlap anatomically.");
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> ZoneIdsFor(
+        IReadOnlyList<Placement> placements,
+        string backendId,
+        BodyRegion region) =>
+        placements
+            .Where(p =>
+                string.Equals(p.BackendId, backendId, StringComparison.OrdinalIgnoreCase)
+                && p.Region == region)
+            .SelectMany(p => p.ZoneIds)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 }
