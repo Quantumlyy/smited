@@ -41,25 +41,32 @@ Edit your user config file (`%APPDATA%\smited\config.json`):
 {
   "Smited": {
     "Backends": {
-      "EnableMockOwo": false,
-      "EnableOwo": true,
-      "Owo": {
-        "BackendId": "owo-primary",
-        "GameDisplayName": "smited haptic daemon",
-        "ManualIp": null,
-        "MaxReconnectAttempts": 3,
-        "HeartbeatSeconds": 5
-      }
+      "Items": [
+        {
+          "Kind": "owo_skin",
+          "Id": "owo-primary",
+          "Enabled": true,
+          "Options": {
+            "GameDisplayName": "smited haptic daemon",
+            "ManualIp": null,
+            "MaxReconnectAttempts": 3,
+            "HeartbeatSeconds": 5
+          }
+        }
+      ]
     }
   }
 }
 ```
 
-`EnableMockOwo` is set to `false` so the mock and real backends don't
-both register and serve `owo_skin`-kinded sensations. Restart the
-daemon. The startup banner shows `owo-primary` registered. Switch to
-MyOWO's "Scan Games" panel and pick `smited haptic daemon` from the
-list — the daemon transitions to `BACKEND_STATUS_READY` once pairing
+This replaces the default `mock_owo` descriptor that ships in
+`appsettings.json` (user-config keys win over the defaults), so the
+mock and real backends don't both register and serve
+`owo_skin`-kinded sensations. To run them side-by-side, list both as
+descriptors in the same `Items` array. Restart the daemon. The
+startup banner shows `owo-primary` registered. Switch to MyOWO's
+"Scan Games" panel and pick `smited haptic daemon` from the list —
+the daemon transitions to `BACKEND_STATUS_READY` once pairing
 completes.
 
 `ManualIp` skips the auto-discovery handshake when set. Use it when
@@ -121,9 +128,14 @@ Iterate the rest of the sample library:
   and you must restart the daemon.
 
 **Banner doesn't show OWO at all on Windows**
-- Confirm `EnableOwo: true` and that `Smited.Daemon.Owo.dll` is in the
+- Confirm an `owo_skin` descriptor exists in `Smited:Backends:Items`
+  with `Enabled: true`, and that `Smited.Daemon.Owo.dll` is in the
   daemon's output directory. The daemon project copies it as content
-  on Windows builds.
+  on Windows builds. If the descriptor is present but the banner still
+  shows zero backends, check the log for `Factory for kind owo_skin
+  declined to create descriptor` — that means the assembly's runtime
+  dependency (`OWO.dll`) is missing; rebuild/republish to refresh the
+  output directory.
 
 ## Panic button
 

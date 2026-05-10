@@ -7,11 +7,13 @@
 
 #if WINDOWS
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 
@@ -96,12 +98,20 @@ public sealed class OwoBackend : IHapticBackend
     private long _lastSendSequence;
 
     /// <summary>
-    /// Constructed by the daemon's <c>BackendBootstrapper</c> via
-    /// <c>ActivatorUtilities.CreateInstance</c>. All collaborators are
-    /// resolved from the host DI container — <see cref="IOwoSdk"/> is
-    /// registered to <c>StaticOwoSdk</c> on Windows when
-    /// <c>EnableOwo</c> is true, otherwise this backend never gets
-    /// constructed.
+    /// Constructed by <c>OwoBackendFactory</c> via
+    /// <c>ActivatorUtilities.CreateInstance</c> when a descriptor of
+    /// kind <c>owo_skin</c> appears in
+    /// <c>SmitedOptions.BackendsOptions.Items</c>. The factory binds
+    /// <see cref="OwoBackendOptions"/> from the descriptor's
+    /// <c>Options</c> sub-section and supplies it as the first
+    /// argument; the rest of the constructor's collaborators —
+    /// <see cref="IOwoSdk"/>, <see cref="TimeProvider"/>,
+    /// <see cref="ILogger{TCategoryName}"/> — are resolved from the
+    /// host DI container. <see cref="IOwoSdk"/> is registered to
+    /// <c>StaticOwoSdk</c> on Windows hosts via the daemon's
+    /// <c>AddOwoBackendIfWindows</c> extension; non-Windows hosts
+    /// never construct this backend because the factory itself isn't
+    /// registered.
     /// </summary>
     public OwoBackend(
         OwoBackendOptions options,
@@ -133,6 +143,9 @@ public sealed class OwoBackend : IHapticBackend
             StringComparer.OrdinalIgnoreCase);
     }
 
+    private string _displayName = "OWO Skin";
+    private bool _displayNameOverridden;
+
     /// <inheritdoc />
     public string Id => _options.BackendId;
 
@@ -140,7 +153,27 @@ public sealed class OwoBackend : IHapticBackend
     public string Kind => "owo_skin";
 
     /// <inheritdoc />
-    public string DisplayName => "OWO Skin";
+    public string DisplayName => _displayName;
+
+    /// <summary>
+    /// Replaces the default <see cref="DisplayName"/> with a per-descriptor
+    /// override. One-shot per instance; a conflicting second override
+    /// throws so a misconfiguration that lands two descriptors at the
+    /// same backend instance can't silently clobber the first override.
+    /// Mirrors <c>MockOwoBackend.OverrideDisplayName</c>.
+    /// </summary>
+    internal void OverrideDisplayName(string displayName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(displayName);
+        if (_displayNameOverridden && !string.Equals(_displayName, displayName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"OwoBackend.DisplayName was already overridden to '{_displayName}'; "
+                + $"cannot re-override to '{displayName}'.");
+        }
+        _displayName = displayName;
+        _displayNameOverridden = true;
+    }
 
     /// <inheritdoc />
     public BackendStatus Status { get; private set; } = BackendStatus.Disconnected;
@@ -170,6 +203,17 @@ public sealed class OwoBackend : IHapticBackend
 
     /// <inheritdoc />
     public Struct? Extras => null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// OWO's manufacturer does not publish a region map; intensity
+    /// safety is handled by the device's calibration ceiling rather
+    /// than zone-level bans. Returns an empty set so the bodymap
+    /// validator only enforces smited's own conservative defaults
+    /// against OWO placements.
+    /// </remarks>
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } =
+        ImmutableHashSet<BodyRegion>.Empty;
 
     /// <inheritdoc />
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();

@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
 using Smited.Daemon.Bhaptics.WebSocket;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 using ProtoStruct = Google.Protobuf.WellKnownTypes.Struct;
@@ -45,6 +47,7 @@ public sealed class BhapticsBackend : IHapticBackend
     private TaskCompletionSource<bool>? _initialStatusReceived;
     private CancellationTokenSource? _reconnectCts;
     private volatile bool _disposed;
+    private string _displayName = "bHaptics TactSuit";
 
     public BhapticsBackend(
         BhapticsBackendOptions options,
@@ -67,9 +70,29 @@ public sealed class BhapticsBackend : IHapticBackend
 
     public string Kind => "bhaptics_tactsuit";
 
-    public string DisplayName => "bHaptics TactSuit";
+    public string DisplayName => _displayName;
 
     public BackendStatus Status => _status;
+
+    /// <summary>
+    /// bHaptics motors are vibration-only; the manufacturer publishes
+    /// no forbidden regions. The smited-default forbidden regions
+    /// (e.g. ChestOverHeart) still apply, layered on top by the
+    /// bodymap validator at registration time.
+    /// </summary>
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } = ImmutableHashSet<BodyRegion>.Empty;
+
+    /// <summary>
+    /// Replaces the default <see cref="DisplayName"/> with a per-descriptor
+    /// override applied by the factory before <c>ConnectAsync</c>. Public
+    /// so the factory in the same assembly can call it without touching
+    /// internal state directly through a sibling namespace.
+    /// </summary>
+    public void OverrideDisplayName(string displayName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(displayName);
+        _displayName = displayName;
+    }
 
     public IReadOnlyList<string> Capabilities { get; } = new[]
     {

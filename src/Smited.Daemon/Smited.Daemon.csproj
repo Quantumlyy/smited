@@ -92,19 +92,19 @@
 
   <!--
     Smited.Daemon.Bhaptics targets net9.0 (no Windows-only build deps,
-    just BCL ClientWebSocket), so the reverse reference is unconditional —
-    the assembly always lands in the daemon's output directory and the
-    BackendBootstrapper decides at runtime whether to load it based on
-    OperatingSystem.IsWindows() AND Smited:Backends:EnableBhaptics. Same
-    reflective-load shape as OWO.
+    just BCL ClientWebSocket), so the reverse reference is a normal
+    compile-time ProjectReference. Unlike OWO — which is loaded
+    reflectively because its net9.0-windows TFM and platform-specific
+    NuGet dependency would force the daemon to take a Windows compile
+    burden — bHaptics shares the daemon's TFM and ships in every
+    build. Direct reference lets BackendsServiceCollectionExtensions
+    register BhapticsBackendFactory without reflection. The factory's
+    own TryCreate enforces the runtime Windows-only constraint
+    (bHaptics Player only runs on Windows) by returning null on
+    non-Windows hosts.
   -->
   <ItemGroup>
-    <ProjectReference Include="..\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <OutputItemType>Content</OutputItemType>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PrivateAssets>all</PrivateAssets>
-    </ProjectReference>
+    <ProjectReference Include="..\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj" />
   </ItemGroup>
 
   <!--

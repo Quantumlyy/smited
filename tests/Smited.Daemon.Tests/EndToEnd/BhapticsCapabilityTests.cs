@@ -7,10 +7,28 @@ namespace Smited.Daemon.Tests.EndToEnd;
 
 public class BhapticsCapabilityTests
 {
+    /// <summary>
+    /// Layered config that brings the default mock-owo (synthesised by
+    /// the empty-Items fallback) plus an explicit mock_bhaptics
+    /// descriptor online for the test. Spelled out as a config dict
+    /// rather than the legacy enableMockBhaptics fixture flag so the
+    /// fixture's signature stays generic over backend kinds.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string?> WithMockBhaptics() =>
+        new Dictionary<string, string?>
+        {
+            ["Smited:Backends:Items:0:Kind"] = "mock_owo",
+            ["Smited:Backends:Items:0:Id"] = "mock-owo",
+            ["Smited:Backends:Items:0:Enabled"] = "true",
+            ["Smited:Backends:Items:1:Kind"] = "mock_bhaptics",
+            ["Smited:Backends:Items:1:Id"] = "mock-bhaptics",
+            ["Smited:Backends:Items:1:Enabled"] = "true",
+        };
+
     [Fact]
     public async Task ListBackends_returns_both_mocks_when_both_enabled()
     {
-        using var fixture = new DaemonFixture(enableMockBhaptics: true);
+        using var fixture = new DaemonFixture(additionalConfig: WithMockBhaptics());
 
         var response = await fixture.Client.ListBackendsAsync(new ListBackendsRequest());
 
@@ -26,7 +44,7 @@ public class BhapticsCapabilityTests
     [Fact]
     public async Task DescribeBackend_mock_bhaptics_returns_full_topology()
     {
-        using var fixture = new DaemonFixture(enableMockBhaptics: true);
+        using var fixture = new DaemonFixture(additionalConfig: WithMockBhaptics());
 
         var response = await fixture.Client.DescribeBackendAsync(
             new DescribeBackendRequest { BackendId = "mock-bhaptics" });
@@ -47,7 +65,7 @@ public class BhapticsCapabilityTests
     [Fact]
     public async Task DescribeBackend_after_SetAccessoriesPresent_returns_expanded_topology()
     {
-        using var fixture = new DaemonFixture(enableMockBhaptics: true);
+        using var fixture = new DaemonFixture(additionalConfig: WithMockBhaptics());
 
         fixture.MockBhapticsController.SetAccessoriesPresent(true);
 

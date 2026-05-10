@@ -64,6 +64,7 @@
   -->
   <ItemGroup Condition="'$(_TargetingWindows)' != 'true'">
     <Compile Remove="OwoBackend.cs" />
+    <Compile Remove="OwoBackendFactory.cs" />
     <Compile Remove="OwoMuscleMap.cs" />
     <Compile Remove="StaticOwoSdk.cs" />
   </ItemGroup>

@@ -1,5 +1,6 @@
 using Google.Protobuf.WellKnownTypes;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 
 namespace Smited.Daemon.Backends;
@@ -34,6 +35,16 @@ public interface IHapticBackend : IAsyncDisposable
     CalibrationState? Calibration { get; }
 
     Struct? Extras { get; }
+
+    /// <summary>
+    /// Body regions where this backend's hardware must never fire, per
+    /// the manufacturer's safety guidance. Non-overridable: the
+    /// bodymap validator refuses to register a backend whose declared
+    /// placements land in these regions, regardless of user
+    /// configuration. Backends with no manufacturer-stated bans return
+    /// an empty set.
+    /// </summary>
+    IReadOnlySet<BodyRegion> ForbiddenRegions { get; }
 
     Task ConnectAsync(CancellationToken ct);
 

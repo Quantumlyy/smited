@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 
@@ -34,6 +36,8 @@ public sealed class MockBhapticsBackend : IHapticBackend, IMockBhapticsControlle
 
     private ZoneTopology _zones;
     private BackendStatus _status = BackendStatus.Ready;
+    private string _id = "mock-bhaptics";
+    private string _displayName = "Mock TactSuit X40";
 
     public MockBhapticsBackend(TimeProvider time, ILogger<MockBhapticsBackend> logger)
     {
@@ -53,13 +57,65 @@ public sealed class MockBhapticsBackend : IHapticBackend, IMockBhapticsControlle
         };
     }
 
-    public string Id => "mock-bhaptics";
+    public string Id => _id;
 
     public string Kind => "bhaptics_tactsuit";
 
-    public string DisplayName => "Mock TactSuit X40";
+    public string DisplayName => _displayName;
 
     public BackendStatus Status => _status;
+
+    /// <summary>
+    /// bHaptics motors are vibration-only; the manufacturer publishes
+    /// no forbidden regions. The smited-default forbidden regions
+    /// (ChestOverHeart, etc.) still apply, layered on top by the
+    /// bodymap validator.
+    /// </summary>
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } = ImmutableHashSet<BodyRegion>.Empty;
+
+    /// <summary>
+    /// Replaces the default <see cref="Id"/> with a per-descriptor
+    /// override at startup. Idempotent for the same value; throws on
+    /// a conflicting second override so the descriptor validator's
+    /// "single mock_bhaptics descriptor" rule isn't silently bypassed
+    /// when it fails to fire.
+    /// </summary>
+    internal void OverrideId(string id)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        if (string.Equals(_id, id, StringComparison.Ordinal))
+        {
+            return;
+        }
+        if (!string.Equals(_id, "mock-bhaptics", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"MockBhapticsBackend.Id was already overridden to '{_id}'; cannot re-override to '{id}'. "
+                + "Configure at most one mock_bhaptics descriptor.");
+        }
+        _id = id;
+    }
+
+    /// <summary>
+    /// Replaces the default <see cref="DisplayName"/> with a per-descriptor
+    /// override. Same idempotency / single-override rules as
+    /// <see cref="OverrideId"/>.
+    /// </summary>
+    internal void OverrideDisplayName(string displayName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(displayName);
+        if (string.Equals(_displayName, displayName, StringComparison.Ordinal))
+        {
+            return;
+        }
+        if (!string.Equals(_displayName, "Mock TactSuit X40", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"MockBhapticsBackend.DisplayName was already overridden to '{_displayName}'; "
+                + $"cannot re-override to '{displayName}'. Configure at most one mock_bhaptics descriptor.");
+        }
+        _displayName = displayName;
+    }
 
     public IReadOnlyList<string> Capabilities { get; } = new[]
     {

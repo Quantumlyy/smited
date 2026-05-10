@@ -20,12 +20,13 @@ Expected log output (Production environment):
 [INF] Now listening on: http://127.0.0.1:7778
 [INF] Application started. Press Ctrl+C to shut down.
 [INF] Hosting environment: Production
-╭─smited───────────────────────────────────────────────╮
-│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on) │
-│ Panic       POST http://127.0.0.1:7778/panic         │
-│ Backends    1 registered                             │
-│ Sensations  5 loaded                                 │
-╰──────────────────────────────────────────────────────╯
+╭─smited──────────────────────────────────────────────╮
+│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)│
+│ Panic       POST http://127.0.0.1:7778/panic        │
+│ Backends    1 registered                            │
+│ Body map    Not configured (warnings off)           │
+│ Sensations  5 loaded                                │
+╰─────────────────────────────────────────────────────╯
 ```
 
 Logs roll daily into `logs/smited-YYYYMMDD.log` next to the binary. Set `ASPNETCORE_ENVIRONMENT=Development` to use `appsettings.Development.json` (binds `0.0.0.0`, increases log level to `Debug`).
@@ -102,10 +103,10 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:PanicPort` | `7778` | `/panic` HTTP/1.1 listener |
 | `Smited:BindAddress` | `127.0.0.1` | Flip to `0.0.0.0` for LAN |
 | `Smited:EnableReflection` | `true` | grpcurl-friendly |
-| `Smited:Backends:EnableMockOwo` | `true` | Always-on mock for development |
-| `Smited:Backends:EnableOwo` | `false` | Real OWO; Windows-only |
-| `Smited:Backends:EnableMockBhaptics` | `false` | TactSuit X40 mock for development |
-| `Smited:Backends:EnableBhaptics` | `false` | Real bHaptics; Windows-only; requires bHaptics Player running |
+| `Smited:Backends:Items` | _array, see below_ | Backends to bring online at startup |
+| `Smited:BodyMap:OverlapPolicy` | `Warn` | `Warn` / `Refuse` / `Off`; see [`docs/body-map.md`](body-map.md) |
+| `Smited:BodyMap:Placements` | _array_ | Per-backend zone-to-region declarations |
+| `Smited:BodyMap:AllowOverrideRegions` | `[]` | Opt out of smited's default forbidden regions |
 | `Smited:Sensations:LibraryRoot` | `./sensations` | Resolved relative to the binary |
 | `Smited:EventBus:BufferCapacity` | `1024` | Per-subscriber channel capacity |
 | `Smited:EventBus:SlowSubscriberPolicy` | `drop_oldest` | Channel `FullMode` for slow consumers |
@@ -113,6 +114,167 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:History:RetentionDays` | `30` | Days to keep rows; `0` = forever |
 | `Smited:History:CustomPath` | _unset_ | Override the SQLite path |
 
-History is daemon-internal — see [`docs/history.md`](history.md) for the schema and example queries.
+History is daemon-internal — see [`docs/history.md`](history.md) for the schema and example queries. The bodymap is also daemon-internal — see [`docs/body-map.md`](body-map.md) for what placements do and the region taxonomy.
 
-The real bHaptics backend talks to a locally-running bHaptics Player over its WebSocket endpoint (default `ws://localhost:15881/v2/feedbacks`). Player must be running on the same Windows machine as the daemon and paired with at least one device before `EnableBhaptics` is meaningful.
+### Backend descriptors
+
+Backends used to be enabled with per-backend booleans (`EnableMockOwo`, `EnableOwo`). The current shape is a typed array of descriptors — each descriptor names a kind and an instance id, and the daemon dispatches it to the matching `IBackendFactory`. Per-instance configuration (e.g. OWO's `GameDisplayName`, `ManualIp`, or bHaptics' `PlayerEndpoint`) lives under the descriptor's `Options` sub-section.
+
+Mock-only:
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  { "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true }
+] } } }
+```
+
+Real OWO only (Windows host):
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  {
+    "Kind": "owo_skin",
+    "Id": "owo-primary",
+    "Enabled": true,
+    "Options": {
+      "GameDisplayName": "smited haptic daemon",
+      "ManualIp": "192.168.1.42",
+      "MaxReconnectAttempts": 3,
+      "HeartbeatSeconds": 5
+    }
+  }
+] } } }
+```
+
+Both side-by-side:
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  { "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true },
+  { "Kind": "owo_skin", "Id": "owo-primary", "Enabled": true,
+    "Options": { "GameDisplayName": "smited haptic daemon" } }
+] } } }
+```
+
+`Enabled: false` keeps a descriptor in the file but skips registration — useful when you want to hold onto the configuration for hardware you've temporarily disconnected.
+
+### Disabling the default mock backend
+
+`appsettings.json` ships with `Smited:Backends:Items` set to an empty array. When the configured `Items` is empty (or missing entirely), the daemon synthesizes a default `mock_owo` descriptor with id `mock-owo` and logs the synthesis at startup. This keeps "just run the daemon" frictionless while letting any non-empty `Items` array opt out cleanly.
+
+To run with only the real OWO backend (no mock), provide an explicit non-empty `Items` array containing only the OWO descriptor:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        {
+          "Kind": "owo_skin",
+          "Id": "owo-primary",
+          "Enabled": true,
+          "Options": {
+            "GameDisplayName": "smited haptic daemon"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+To run with no backends at all (uncommon — the daemon's gRPC surface will report no registered backends), pin the array to a disabled placeholder so it stays non-empty without registering anything:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        { "Kind": "no_op", "Id": "placeholder", "Enabled": false }
+      ]
+    }
+  }
+}
+```
+
+The `Enabled: false` keeps the descriptor from tripping the "no factory registered for kind" warning at registration time; the validator itself only requires `Kind` and `Id` to be present.
+
+### Keeping disabled-but-documented hardware around
+
+A useful workflow for development: keep a disabled descriptor for a real backend you're occasionally testing against, alongside the enabled mock. Toggle `Enabled` to flip between mock-only and mock-plus-real without re-typing the descriptor each time:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        { "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true },
+        {
+          "Kind": "owo_skin",
+          "Id": "owo-primary",
+          "Enabled": false,
+          "Options": {
+            "GameDisplayName": "smited (dev)"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+> **Place this in your user config**, not in `appsettings.Development.json`. .NET configuration merges array children **by index** across configuration sources, so a sample `Items[1]` in the layer file silently appends to user-supplied arrays. A user whose own config has only `Items[0]` would inherit the layer file's `Items[1]` as a ghost entry, often producing duplicate ids and aborting startup. User config (`~/.config/smited/config.json` on macOS/Linux, `%APPDATA%\smited\config.json` on Windows) is the right home for sample shapes you want to copy and edit.
+
+The validator's "at most one enabled descriptor of a singleton kind" rule applies to enabled entries only — keeping a disabled `owo_skin` alongside a different enabled `owo_skin` does not trip that check, because the disabled descriptor never reaches the factory.
+
+### Migrating from the legacy Smited:Backends boolean knobs
+
+Pre-v0.2, `Smited:Backends` accepted boolean toggles:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "EnableMockOwo": true,
+      "EnableOwo": false,
+      "Owo": { "GameDisplayName": "..." }
+    }
+  }
+}
+```
+
+These keys are removed in v0.2. Replace with an explicit `Items` array. The daemon does not read `EnableMockOwo`, `EnableOwo`, or `Owo` anymore — a configuration that still uses those keys is treated as if `Backends` were empty, which under the empty-Items default fallback registers `mock-owo` (NOT zero backends — the synthesis behavior is described in [Disabling the default mock backend](#disabling-the-default-mock-backend) above).
+
+| Pre-v0.2 | v0.2+ |
+|---|---|
+| `"EnableMockOwo": true` (the default) | Omit `Items` entirely, or set `"Items": []`. The daemon synthesizes the default `mock-owo` descriptor at startup. |
+| `"EnableMockOwo": true` + `"EnableOwo": true` + `"Owo": { ... }` | An `Items` array with one `mock_owo` descriptor and one `owo_skin` descriptor whose `Options` carries the previous `Owo` sub-section. |
+| `"EnableOwo": true` + `"Owo": { ... }` (no mock) | An `Items` array with only the `owo_skin` descriptor — non-empty `Items` suppresses the default-mock synthesis. |
+| `"EnableMockOwo": false` (no backends at all) | An `Items` array with a single `Enabled: false` placeholder — see "[no backends at all](#disabling-the-default-mock-backend)" above for why a non-empty array is needed. |
+
+### bHaptics descriptors
+
+The bHaptics backend ships in two flavors. Both descriptor kinds are singletons (one enabled descriptor at a time):
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  { "Kind": "mock_bhaptics", "Id": "mock-bhaptics", "Enabled": true }
+] } } }
+```
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  {
+    "Kind": "bhaptics_tactsuit",
+    "Id": "bhaptics-primary",
+    "Enabled": true,
+    "Options": {
+      "PlayerEndpoint": "ws://localhost:15881/v2/feedbacks",
+      "MaxReconnectAttempts": 3,
+      "InitialStatusTimeoutMillis": 1500
+    }
+  }
+] } } }
+```
+
+The real bHaptics backend talks to a locally-running bHaptics Player over its WebSocket endpoint (default `ws://localhost:15881/v2/feedbacks`); the Player must be running on the same Windows machine as the daemon and paired with at least one device for the descriptor to be useful. On non-Windows hosts, `BhapticsBackendFactory.TryCreate` declines and logs at `INFO` so the daemon stays up. See [`docs/bhaptics.md`](bhaptics.md) for the full setup walkthrough and on-hardware verification checklist.

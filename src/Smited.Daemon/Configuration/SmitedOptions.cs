@@ -1,5 +1,3 @@
-using Smited.Daemon.Backends;
-
 namespace Smited.Daemon.Configuration;
 
 /// <summary>
@@ -30,51 +28,30 @@ public sealed class SmitedOptions
 
     public BackendsOptions Backends { get; set; } = new();
 
+    /// <summary>
+    /// Daemon-internal bodymap configuration: declared zone placements
+    /// and overlap policy. Defaults to empty (unmapped mode); see
+    /// <see cref="BodyMapOptions"/> for shape.
+    /// </summary>
+    public BodyMapOptions BodyMap { get; set; } = new();
+
     public SensationsOptions Sensations { get; set; } = new();
 
     public EventBusOptions EventBus { get; set; } = new();
 
     public HistoryOptions History { get; set; } = new();
 
-    /// <summary>
-    /// Runtime configuration for the bHaptics backend. The actual type
-    /// lives in <c>Smited.Daemon.Abstractions</c> so the
-    /// <c>Smited.Daemon.Bhaptics</c> assembly can take it as a
-    /// constructor dependency without depending on the daemon host.
-    /// </summary>
-    public BhapticsBackendOptions Bhaptics { get; set; } = new();
-
     public sealed class BackendsOptions
     {
-        public bool EnableMockOwo { get; set; } = true;
-        public bool EnableOwo { get; set; }
-
         /// <summary>
-        /// When <c>true</c>, registers the in-process
-        /// <c>MockBhapticsBackend</c> at startup. Provides a faithful
-        /// TactSuit X40 simulation for development and testing without
-        /// requiring bHaptics hardware or the bHaptics Player app.
-        /// Defaults to <c>false</c> so existing single-mock setups keep
-        /// their current behaviour.
+        /// Backend descriptors to bring online at startup. Each entry
+        /// names a kind and an instance id; the daemon resolves the
+        /// matching <c>IBackendFactory</c> and lets it construct the
+        /// backend. Per-instance configuration sits under the entry's
+        /// <c>Options</c> sub-section, addressed by the bootstrapper as
+        /// <c>Smited:Backends:Items:{i}:Options</c>.
         /// </summary>
-        public bool EnableMockBhaptics { get; set; }
-
-        /// <summary>
-        /// When <c>true</c>, attempts to load the Windows-only
-        /// <c>BhapticsBackend</c> from the <c>Smited.Daemon.Bhaptics</c>
-        /// assembly at startup. No-op (with warning log) when not running
-        /// on Windows or when the assembly is missing from the build
-        /// output. Final connection to bHaptics Player happens during
-        /// <c>ConnectAsync</c>; failure is logged and the backend is
-        /// skipped without aborting daemon startup.
-        /// </summary>
-        public bool EnableBhaptics { get; set; }
-
-        /// <summary>
-        /// Configuration for the real OWO Skin backend, used when
-        /// <see cref="EnableOwo"/> is <c>true</c> on a Windows host.
-        /// </summary>
-        public OwoBackendOptions Owo { get; set; } = new();
+        public List<BackendDescriptor> Items { get; set; } = new();
     }
 
     public sealed class SensationsOptions

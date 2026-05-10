@@ -6,6 +6,7 @@ using ProtoValidate;
 using Serilog;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Diagnostics;
 using Smited.Daemon.Events;
@@ -47,69 +48,29 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
+// MockBhapticsBackend is also a DI singleton so IMockBhapticsController
+// stays wired to the same instance that the descriptor factory hands
+// to BackendRegistry.
 builder.Services.AddSingleton<MockBhapticsBackend>();
 builder.Services.AddSingleton<IMockBhapticsController>(sp => sp.GetRequiredService<MockBhapticsBackend>());
 
-// Republish the BhapticsBackendOptions slice as a top-level singleton so
-// ActivatorUtilities can hand it to the reflectively-loaded BhapticsBackend
-// constructor — its assembly references Abstractions, not the daemon's
-// Configuration namespace, so it can't take IOptions<SmitedOptions>.
-builder.Services.AddSingleton<Smited.Daemon.Backends.BhapticsBackendOptions>(sp =>
-    sp.GetRequiredService<IOptions<SmitedOptions>>().Value.Bhaptics);
+builder.Services.AddSingleton<BodyMapValidator>();
+builder.Services.AddSingleton<BodyMapState>();
+builder.Services.AddSingleton<IBodyMapState>(sp => sp.GetRequiredService<BodyMapState>());
 
-// OwoBackend (when enabled) is loaded reflectively in BackendBootstrapper and
-// constructed via ActivatorUtilities.CreateInstance, which resolves its
-// OwoBackendOptions parameter from the container. Surfacing the nested options
-// here lets the OWO backend stay decoupled from SmitedOptions/IOptions<T>.
-builder.Services.AddSingleton(sp =>
-    sp.GetRequiredService<IOptions<SmitedOptions>>().Value.Backends.Owo);
+// Cross-platform backend factory registrations (mock_owo, mock_bhaptics,
+// bhaptics_tactsuit). The bHaptics factory is cross-platform-built but
+// declines at TryCreate time on non-Windows because bHaptics Player
+// only runs on Windows.
+builder.Services.AddSmitedBackends();
 
-// IOwoSdk is registered only on Windows + EnableOwo because StaticOwoSdk
-// imports the OWOGame namespace, which is only present in the Windows-only
-// OWO NuGet package. The implementation is loaded reflectively so this
-// project doesn't need a compile-time reference to Smited.Daemon.Owo on
-// Mac/Linux. The Type.GetType call is wrapped because — even with
-// throwOnError=false (the default) — file-load failures surface here:
-// if Smited.Daemon.Owo.dll is present but its OWO.dll runtime dependency
-// is missing or unloadable, the lookup throws FileNotFoundException /
-// FileLoadException / TypeLoadException. Crashing daemon startup on that
-// path defeats the point of the reflective load; we log via Serilog (the
-// host logger isn't constructed yet but Serilog's static API is wired
-// from configuration earlier) and skip registration. BackendBootstrapper's
-// own reflective lookup of OwoBackend will then log the user-facing
-// "EnableOwo set but assembly missing" warning when it hits the same
-// resolution.
-if (OperatingSystem.IsWindows())
-{
-    var enableOwo = builder.Configuration.GetValue<bool>("Smited:Backends:EnableOwo");
-    if (enableOwo)
-    {
-        Type? staticSdkType = null;
-        try
-        {
-            staticSdkType = Type.GetType("Smited.Daemon.Owo.StaticOwoSdk, Smited.Daemon.Owo");
-        }
-        catch (Exception ex)
-        {
-            // Serilog's host pipeline isn't online yet (UseSerilog is
-            // configured but the host hasn't started), so the static
-            // Log.Logger would no-op here. Console.Error is the
-            // pre-host-start signal channel; BackendBootstrapper will
-            // also log a structured warning later when its own
-            // reflective lookup runs.
-            Console.Error.WriteLine(
-                "warn: Skipping IOwoSdk registration; reflective load of "
-                + "Smited.Daemon.Owo.StaticOwoSdk threw. The daemon will "
-                + "still run; OWO triggers will be rejected as if the "
-                + $"assembly were absent. Underlying error: {ex.GetType().Name}: {ex.Message}");
-        }
-
-        if (staticSdkType is not null)
-        {
-            builder.Services.AddSingleton(typeof(IOwoSdk), staticSdkType);
-        }
-    }
-}
+// Reflectively register OwoBackendFactory + StaticOwoSdk on Windows.
+// No-op on non-Windows; the daemon stays up and OWO triggers are
+// rejected as if the assembly were absent. The factory binds its
+// OwoBackendOptions from the descriptor's Options sub-section, so
+// the legacy SmitedOptions.Backends.Owo singleton registration is
+// no longer needed.
+builder.Services.AddOwoBackendIfWindows();
 
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE
@@ -193,7 +154,8 @@ lifetime.ApplicationStarted.Register(() =>
     var dbPath = opts.History.Enabled
         ? app.Services.GetRequiredService<HistoryDbPath>().Value
         : null;
-    StartupBanner.Render(opts, registry.Count, library.Count, dbPath);
+    var bodyMapState = app.Services.GetRequiredService<IBodyMapState>();
+    StartupBanner.Render(opts, registry.Count, library.Count, dbPath, bodyMapState);
 });
 
 await app.RunAsync();
