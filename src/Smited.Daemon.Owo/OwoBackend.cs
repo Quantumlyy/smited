@@ -428,7 +428,15 @@ public sealed class OwoBackend : IHapticBackend
             }
 
             EmitEvent(finalEvent);
-        }, ct);
+        });
+        // Deliberately not passing `ct` to Task.Run: if the caller's
+        // token is already cancelled (or is cancelled before the thread
+        // pool dequeues the delegate), the Task.Run scheduler returns a
+        // pre-cancelled task without ever running the body, which would
+        // skip the finally block above and leak the
+        // _activeSensations entry plus the linked CTS. Cancellation
+        // propagation is already covered inside the delegate via the
+        // linked.Token threaded through every Task.Delay.
 
         return Task.FromResult(new BackendTriggerResult(request.SensationId, totalDuration));
     }

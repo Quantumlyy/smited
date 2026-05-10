@@ -315,6 +315,38 @@ public class OwoBackendTests
             && c.ZoneIds.Contains("arm_r")));
     }
 
+    [Fact]
+    public async Task TriggerAsync_with_pre_cancelled_token_still_emits_Cancelled_and_clears_tracking()
+    {
+        // Regression for an earlier bug where the dispatch Task.Run was
+        // started with the caller's token. If the gRPC call cancelled
+        // before the thread pool dequeued the delegate, Task.Run
+        // returned a pre-cancelled task without ever running the body —
+        // the `finally` that drains _activeSensations and disposes the
+        // linked CTS never fired, leaking the sensation entry and
+        // skipping the SensationCancelled event.
+        var backend = await NewReadyBackend();
+        await using var ____ = backend.B;
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await backend.B.TriggerAsync(MakeRequest("cancelled-pre", TimeSpan.FromSeconds(5)), cts.Token);
+
+        var enumerator = backend.B.Events.GetAsyncEnumerator();
+        (await NextWithin(enumerator, TimeSpan.FromSeconds(1)))
+            .Should().BeOfType<SensationStarted>();
+        (await NextWithin(enumerator, TimeSpan.FromSeconds(1)))
+            .Should().BeOfType<SensationCancelled>();
+
+        // Pump once more so the finally block has definitely run.
+        await Task.Delay(20);
+
+        var stopped = await backend.B.StopAsync(
+            new BackendStopRequest("cancelled-pre", All: false), CancellationToken.None);
+        stopped.Should().Be(0); // Already drained, not still tracked.
+    }
+
     private record ReadyBackend(OwoBackend B, IOwoSdk Sdk, FakeTimeProvider Time);
 
     private static async Task<ReadyBackend> NewReadyBackend()
