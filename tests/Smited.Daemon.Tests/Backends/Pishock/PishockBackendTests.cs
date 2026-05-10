@@ -233,6 +233,53 @@ public class PishockBackendTests
     }
 
     [Fact]
+    public async Task DisposeAsync_cancels_pending_microsensations_so_client_is_not_called_after_dispose()
+    {
+        // The playback task awaits Task.Delay(delay_before, _time, ct)
+        // between microsensations. If DisposeAsync only completes the
+        // event channel without cancelling the trigger's CTS, those
+        // pending awaits keep going on the FakeTimeProvider's clock and
+        // can still call the client after the backend is disposed —
+        // shutdown becomes silently leaky and the device fires opaquely
+        // unrelated to the daemon's lifecycle.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            MaxBurst = 5,
+        });
+
+        var request = new BackendTriggerRequest(
+            SensationId: "seq",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[]
+            {
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 0),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 1000),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 1000),
+            });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+        var callsBeforeDispose = client.Calls.Count;
+
+        await backend.DisposeAsync();
+
+        // Push fake time past where the second and third pulses would
+        // have fired. Without disposal cancellation, those Task.Delays
+        // would complete and the client would see two more calls.
+        time.Advance(TimeSpan.FromSeconds(5));
+        await Task.Yield();
+        await Task.Delay(50);
+
+        client.Calls.Count.Should().Be(callsBeforeDispose);
+    }
+
+    [Fact]
     public async Task TriggerAsync_in_cloud_mode_estimates_duration_rounded_up_to_seconds()
     {
         // The cloud API takes Duration in whole seconds (1..15). A 100ms

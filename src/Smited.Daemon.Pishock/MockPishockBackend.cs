@@ -36,6 +36,13 @@ public sealed class MockPishockBackend : IHapticBackend
     private readonly ILogger<MockPishockBackend> _logger;
     private readonly Channel<BackendEvent> _events = Channel.CreateUnbounded<BackendEvent>();
     private readonly TokenBucket _bucket;
+    /// <summary>
+    /// Backend-lifetime CTS linked into every per-trigger CTS. Cancelling
+    /// it on disposal aborts the in-flight playback's pending Task.Delay
+    /// so the mock matches the real backend's shutdown semantic — no
+    /// late events firing on a disposed backend.
+    /// </summary>
+    private readonly CancellationTokenSource _disposing = new();
 
     public MockPishockBackend(
         string id,
@@ -150,8 +157,10 @@ public sealed class MockPishockBackend : IHapticBackend
         // a test that calls FakeTimeProvider.Advance immediately after
         // Trigger races the Task.Run scheduling, the delay registers
         // *after* the advance, and SensationCompleted never fires within
-        // the test's expected window.
-        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // the test's expected window. Linked to _disposing.Token so
+        // backend disposal cancels the pending delay instead of
+        // letting it fire on a disposed backend.
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _disposing.Token);
         var delay = estimated > TimeSpan.Zero
             ? Task.Delay(estimated, _time, linked.Token)
             : Task.CompletedTask;
@@ -196,10 +205,15 @@ public sealed class MockPishockBackend : IHapticBackend
     public Task<int> StopAsync(BackendStopRequest request, CancellationToken ct) =>
         Task.FromResult(0);
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        try
+        {
+            await _disposing.CancelAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) { }
         _events.Writer.TryComplete();
-        return ValueTask.CompletedTask;
+        _disposing.Dispose();
     }
 
     private void EmitEvent(BackendEvent evt) => _events.Writer.TryWrite(evt);

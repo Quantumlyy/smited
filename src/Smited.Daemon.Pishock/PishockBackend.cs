@@ -37,6 +37,13 @@ public sealed class PishockBackend : IHapticBackend
     private readonly ILogger<PishockBackend> _logger;
     private readonly Channel<BackendEvent> _events = Channel.CreateUnbounded<BackendEvent>();
     private readonly TokenBucket _bucket;
+    /// <summary>
+    /// Backend-lifetime CTS linked into every per-trigger CTS. Cancelling
+    /// it on disposal aborts every in-flight playback's pending awaits so
+    /// shutdown doesn't leak future client calls firing on a disposed
+    /// backend.
+    /// </summary>
+    private readonly CancellationTokenSource _disposing = new();
 
     public PishockBackend(
         string id,
@@ -131,7 +138,10 @@ public sealed class PishockBackend : IHapticBackend
             Id, _time.GetUtcNow(),
             request.SensationId, request.SensationName, request.ClientTraceId));
 
-        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Link to BOTH the caller's ct AND the backend's _disposing
+        // token so disposal aborts every pending await across every
+        // active trigger.
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _disposing.Token);
         _ = Task.Run(() => RunPlaybackAsync(request, linked));
 
         return Task.FromResult(new BackendTriggerResult(request.SensationId, estimated));
@@ -236,10 +246,20 @@ public sealed class PishockBackend : IHapticBackend
     public Task<int> StopAsync(BackendStopRequest request, CancellationToken ct) =>
         Task.FromResult(0);
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        try
+        {
+            // Cancel _disposing first so every active playback's linked
+            // CTS fires; their pending Task.Delays throw and the
+            // playback tasks exit through their catch path. Completing
+            // the channel writer afterward lets late SensationCancelled
+            // events flush to subscribers that are still reading.
+            await _disposing.CancelAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) { }
         _events.Writer.TryComplete();
-        return ValueTask.CompletedTask;
+        _disposing.Dispose();
     }
 
     private void EmitEvent(BackendEvent evt) => _events.Writer.TryWrite(evt);
