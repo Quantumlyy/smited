@@ -135,10 +135,13 @@ to fire as one trigger. Either bump `MaxBurst` for that descriptor or
 split the sensation across multiple triggers spaced by the refill rate.
 
 The token bucket is independent of the daemon's `ConcurrencyModel`
-(which is `MaxConcurrent: 1, Policy: CancelOldest` for PiShock — the
-device is single-channel so a new trigger preempts whatever's
-running). The bucket prevents runaway request rates; concurrency
-prevents overlapping playback.
+(which is `MaxConcurrent: 1, Policy: RejectNew` for PiShock — the
+device is single-channel and the wire protocol has no
+"cancel-in-progress" message, so a follow-up trigger arriving during
+an in-flight op gets `TRIGGER_ERROR_CODE_RATE_LIMITED` rather than
+silently overlapping the previous pulse on the device). The bucket
+prevents runaway request rates; concurrency prevents overlapping
+playback.
 
 ## Forbidden regions
 

@@ -113,12 +113,19 @@ public class MockPishockBackendTests
     }
 
     [Fact]
-    public void Concurrency_is_single_channel_with_cancel_oldest_policy()
+    public void Concurrency_is_single_channel_with_reject_new_policy()
     {
+        // CancelOldest would only cancel the daemon's local Task.Delay;
+        // PiShock's wire protocol has no "cancel an in-progress op"
+        // message so the device keeps firing the previous pulse, and a
+        // follow-up trigger sends a second op while the first is still
+        // active. RejectNew makes MaxConcurrent=1 actually mean "one
+        // op at a time on this device" — overlapping triggers get a
+        // structured RATE_LIMITED instead of silently double-firing.
         var backend = NewBackend(out _);
 
         backend.Concurrency.MaxConcurrent.Should().Be(1u);
-        backend.Concurrency.Policy.Should().Be(ConcurrencyPolicy.CancelOldest);
+        backend.Concurrency.Policy.Should().Be(ConcurrencyPolicy.RejectNew);
     }
 
     [Fact]

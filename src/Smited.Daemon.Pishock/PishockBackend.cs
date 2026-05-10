@@ -64,7 +64,12 @@ public sealed class PishockBackend : IHapticBackend
         Concurrency = new ConcurrencyModel
         {
             MaxConcurrent = 1,
-            Policy = ConcurrencyPolicy.CancelOldest,
+            // RejectNew rather than CancelOldest because PiShock's wire
+            // protocol has no "cancel in-progress" message — preempting
+            // would only cancel the daemon's local Task.Delay while the
+            // device kept firing, then send a second op overlapping the
+            // first.
+            Policy = ConcurrencyPolicy.RejectNew,
         };
         _bucket = new TokenBucket(options.MaxBurst, options.MaxOpsPerSecond, time);
     }
