@@ -2,20 +2,20 @@
   "name": "deploy_success",
   "backend_kind": "owo_skin",
   "display_name": "Deploy Success",
-  "description": "Wide warm wave across the torso — production caught the new build.",
+  "description": "Brief warm pulse on the upper back — production took the new build.",
   "tags": ["build", "deploy", "success"],
-  "default_zone_ids": ["torso"],
-  "default_intensity": 65,
-  "estimated_duration": "0.9s",
+  "default_zone_ids": ["dorsal_l", "dorsal_r"],
+  "default_intensity": 45,
+  "estimated_duration": "0.6s",
   "definition": {
     "microsensations": [
       {
         "parameters": {
-          "frequency": { "number": 30 },
-          "intensity": { "number": 65 },
-          "duration": { "duration": "0.7s" },
+          "frequency": { "number": 25 },
+          "intensity": { "number": 45 },
+          "duration": { "duration": "0.35s" },
           "ramp_up": { "duration": "0.1s" },
-          "ramp_down": { "duration": "0.1s" }
+          "ramp_down": { "duration": "0.15s" }
         }
       }
     ]
