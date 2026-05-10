@@ -41,6 +41,15 @@ internal sealed class BodyMapValidator
         var regionsByBackend = new Dictionary<string, HashSet<BodyRegion>>(
             StringComparer.OrdinalIgnoreCase);
 
+        // zoneRegions[backendId][leafZoneId] = declared region. Used
+        // by the trigger-time overlap check to translate a trigger's
+        // resolved zone set into regions touched. First-write-wins on
+        // duplicates so a misconfiguration (one zone in two regions)
+        // doesn't crash the validator; it surfaces as either a
+        // forbidden-region error or just incoherent overlap output.
+        var zoneRegions = new Dictionary<string, Dictionary<string, BodyRegion>>(
+            StringComparer.OrdinalIgnoreCase);
+
         var smitedDefaults = SmitedDefaultForbiddenRegions.Default
             .Except(options.AllowOverrideRegions)
             .ToImmutableHashSet();
@@ -151,6 +160,16 @@ internal sealed class BodyMapValidator
             {
                 set.Add(ancestor);
             }
+
+            if (!zoneRegions.TryGetValue(backend.Id, out var zoneMap))
+            {
+                zoneMap = new Dictionary<string, BodyRegion>(StringComparer.OrdinalIgnoreCase);
+                zoneRegions[backend.Id] = zoneMap;
+            }
+            foreach (var leaf in resolvedLeafZones)
+            {
+                zoneMap.TryAdd(leaf, placement.Region);
+            }
         }
 
         // Build the inverse index: region → set of backend ids that
@@ -206,6 +225,11 @@ internal sealed class BodyMapValidator
                 StringComparer.OrdinalIgnoreCase),
             backendsByRegion.ToDictionary(
                 kv => kv.Key,
-                kv => (IReadOnlySet<string>)kv.Value.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase)));
+                kv => (IReadOnlySet<string>)kv.Value.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase)),
+            zoneRegions.ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyDictionary<string, BodyRegion>)kv.Value
+                    .ToImmutableDictionary(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase));
     }
 }

@@ -38,7 +38,8 @@ internal sealed class DaemonFixture : IDisposable
     public DaemonFixture(
         Action<string>? seed = null,
         Action<IServiceCollection>? configureServices = null,
-        string? libraryRoot = null)
+        string? libraryRoot = null,
+        IReadOnlyDictionary<string, string?>? additionalConfig = null)
     {
         _libraryRoot = libraryRoot ?? Path.Combine(Path.GetTempPath(), "smited-fixture-" + Guid.NewGuid().ToString("N"));
         _ownsLibraryRoot = libraryRoot is null;
@@ -60,7 +61,7 @@ internal sealed class DaemonFixture : IDisposable
                 builder.UseEnvironment("Testing");
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    var baseConfig = new Dictionary<string, string?>
                     {
                         ["Smited:GrpcPort"] = "0",
                         ["Smited:PanicPort"] = "0",
@@ -72,7 +73,15 @@ internal sealed class DaemonFixture : IDisposable
                         ["Smited:History:Enabled"] = "true",
                         ["Smited:History:CustomPath"] = Path.Combine(_libraryRoot, "history.db"),
                         ["Serilog:MinimumLevel"] = "Warning",
-                    });
+                    };
+                    if (additionalConfig is not null)
+                    {
+                        foreach (var (key, value) in additionalConfig)
+                        {
+                            baseConfig[key] = value;
+                        }
+                    }
+                    config.AddInMemoryCollection(baseConfig);
                 });
                 builder.ConfigureTestServices(services =>
                 {

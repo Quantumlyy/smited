@@ -1,6 +1,15 @@
 using System.Collections.Immutable;
+using Smited.Daemon.Backends;
 
 namespace Smited.Daemon.BodyMap;
+
+/// <summary>
+/// First overlap match found by <see cref="IBodyMapState.CheckOverlap"/>.
+/// </summary>
+/// <param name="Region">Region where the overlap occurs.</param>
+/// <param name="OtherBackendId">A backend other than the trigger's that also covers <see cref="Region"/>.</param>
+/// <param name="ZoneId">The zone in the trigger's zone-set that hit the overlap.</param>
+internal sealed record OverlapHit(BodyRegion Region, string OtherBackendId, string ZoneId);
 
 /// <summary>
 /// Daemon-wide singleton holding the result of the bodymap validation
@@ -33,6 +42,16 @@ internal interface IBodyMapState
     /// the startup banner.
     /// </summary>
     int WarningCount { get; }
+
+    /// <summary>
+    /// Returns the first overlap hit between <paramref name="backend"/>'s
+    /// trigger zone-set and another registered backend's coverage,
+    /// or <c>null</c> when there is no overlap. Caller is expected to
+    /// gate the call on <see cref="OverlapPolicy"/>; this method does
+    /// not check the policy itself so unit tests can exercise it
+    /// without configuring policy each time.
+    /// </summary>
+    OverlapHit? CheckOverlap(IHapticBackend backend, IReadOnlyList<string> zoneIds);
 }
 
 internal sealed class BodyMapState : IBodyMapState
@@ -44,6 +63,10 @@ internal sealed class BodyMapState : IBodyMapState
     private static readonly IReadOnlyDictionary<BodyRegion, IReadOnlySet<string>>
         EmptyBackendsByRegion =
             ImmutableDictionary<BodyRegion, IReadOnlySet<string>>.Empty;
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, BodyRegion>>
+        EmptyZoneRegions =
+            ImmutableDictionary<string, IReadOnlyDictionary<string, BodyRegion>>.Empty;
 
     public OverlapPolicy OverlapPolicy { get; private set; } = OverlapPolicy.Warn;
 
@@ -58,6 +81,9 @@ internal sealed class BodyMapState : IBodyMapState
 
     public IReadOnlyDictionary<BodyRegion, IReadOnlySet<string>> BackendsByRegion { get; private set; }
         = EmptyBackendsByRegion;
+
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, BodyRegion>> ZoneRegions { get; private set; }
+        = EmptyZoneRegions;
 
     /// <summary>
     /// Called by <c>BackendBootstrapper</c> exactly once during
@@ -77,5 +103,58 @@ internal sealed class BodyMapState : IBodyMapState
         WarningCount = result.Warnings.Count;
         RegionsByBackend = result.RegionsByBackend;
         BackendsByRegion = result.BackendsByRegion;
+        ZoneRegions = result.ZoneRegions;
+    }
+
+    /// <inheritdoc />
+    public OverlapHit? CheckOverlap(IHapticBackend backend, IReadOnlyList<string> zoneIds)
+    {
+        ArgumentNullException.ThrowIfNull(backend);
+        ArgumentNullException.ThrowIfNull(zoneIds);
+
+        if (!ZoneRegions.TryGetValue(backend.Id, out var zoneMap))
+        {
+            // Backend has no declared placements — Unspecified-mode;
+            // overlap is meaningless.
+            return null;
+        }
+
+        // Expand groups so the placement zone-region map (which is
+        // keyed on leaf zones the validator resolved) sees the same
+        // ids the trigger ultimately addresses.
+        var groupMembers = backend.Zones.Groups.ToDictionary(
+            g => g.Id,
+            g => (IReadOnlyList<string>)g.ZoneIds.ToArray(),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var zoneId in zoneIds)
+        {
+            IEnumerable<string> leaves = groupMembers.TryGetValue(zoneId, out var members)
+                ? members
+                : new[] { zoneId };
+
+            foreach (var leaf in leaves)
+            {
+                if (!zoneMap.TryGetValue(leaf, out var region))
+                {
+                    continue;
+                }
+
+                if (!BackendsByRegion.TryGetValue(region, out var backendsHere))
+                {
+                    continue;
+                }
+
+                foreach (var otherId in backendsHere)
+                {
+                    if (!string.Equals(otherId, backend.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new OverlapHit(region, otherId, leaf);
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 }

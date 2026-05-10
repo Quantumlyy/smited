@@ -3,8 +3,8 @@ namespace Smited.Daemon.BodyMap;
 /// <summary>
 /// Outcome of <see cref="BodyMapValidator.Validate"/>: every error
 /// (severity-graded by <see cref="BodyMapErrorKind"/>), every warning,
-/// and the forward and inverse indices the trigger-time overlap check
-/// needs.
+/// and the forward / inverse / per-zone indices the trigger-time
+/// overlap check needs.
 /// </summary>
 /// <param name="Errors">Per-placement errors. See <see cref="BodyMapErrorKind"/>.</param>
 /// <param name="Warnings">Multi-backend overlap warnings.</param>
@@ -16,11 +16,17 @@ namespace Smited.Daemon.BodyMap;
 /// Inverse index: region → set of backend ids that cover the region.
 /// Used by trigger-time overlap rejection.
 /// </param>
+/// <param name="ZoneRegions">
+/// Per-(backend, leaf zone) → declared region. Lets the trigger
+/// coordinator translate a trigger's resolved zone set into the
+/// regions it touches without re-running the validator.
+/// </param>
 internal sealed record BodyMapValidationResult(
     IReadOnlyList<BodyMapError> Errors,
     IReadOnlyList<BodyMapWarning> Warnings,
     IReadOnlyDictionary<string, IReadOnlySet<BodyRegion>> RegionsByBackend,
-    IReadOnlyDictionary<BodyRegion, IReadOnlySet<string>> BackendsByRegion);
+    IReadOnlyDictionary<BodyRegion, IReadOnlySet<string>> BackendsByRegion,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, BodyRegion>> ZoneRegions);
 
 /// <summary>
 /// One placement-level error. <see cref="Kind"/> drives whether the
