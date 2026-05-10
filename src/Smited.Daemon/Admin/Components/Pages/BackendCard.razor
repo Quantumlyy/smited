@@ -16,7 +16,7 @@
         </div>
         <div>
             <span class="pill @StatusPillClass">@StatusLabel</span>
-            <button class="btn-primary" style="margin-left:0.5rem" @onclick="StopAll" disabled="@(_inFlight <= 0)">Stop all</button>
+            <button class="btn-primary" style="margin-left:0.5rem" @onclick="StopAll">Stop all@(_inFlight > 0 ? $" ({_inFlight})" : "")</button>
         </div>
     </div>
 
