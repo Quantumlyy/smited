@@ -152,6 +152,10 @@ public sealed class PishockBackend : IHapticBackend
     {
         var ct = linked.Token;
         BackendEvent finalEvent;
+        // Captures the device's rejection reason so the SensationCancelled
+        // event can carry "why" through to event-stream and history
+        // consumers.
+        string? deviceRejectReason = null;
         try
         {
             for (var i = 0; i < request.Microsensations.Count; i++)
@@ -192,15 +196,19 @@ public sealed class PishockBackend : IHapticBackend
                     .ConfigureAwait(false);
                 if (!result.Accepted)
                 {
-                    // Device or network said no. The trigger has already
-                    // returned Accepted to the coordinator; the failure
-                    // surfaces here as a log line. A future event-stream
-                    // refinement could emit a BackendError so the gRPC
-                    // event subscribers see it too.
+                    // Device or network said no. Bail out of the
+                    // sequence — credentials don't become valid mid
+                    // sequence, an offline device doesn't come back.
+                    // The Cancelled event below carries the reason
+                    // through to event-stream/history consumers so
+                    // they don't see "Completed" for a sensation
+                    // that didn't reach the hardware.
+                    var reason = result.ErrorMessage ?? "(no message)";
                     _logger.LogWarning(
                         "PiShock {BackendId} step {Step}/{Total}: device rejected {Op}: {Error}",
-                        Id, i + 1, request.Microsensations.Count, op,
-                        result.ErrorMessage ?? "(no message)");
+                        Id, i + 1, request.Microsensations.Count, op, reason);
+                    deviceRejectReason = $"device rejected: {reason}";
+                    break;
                 }
 
                 // Wait the EFFECTIVE duration — what the device is
@@ -217,9 +225,14 @@ public sealed class PishockBackend : IHapticBackend
                 }
             }
 
-            finalEvent = new SensationCompleted(
-                Id, _time.GetUtcNow(),
-                request.SensationId, request.SensationName, request.ClientTraceId);
+            finalEvent = deviceRejectReason is not null
+                ? new SensationCancelled(
+                    Id, _time.GetUtcNow(),
+                    request.SensationId, request.SensationName, request.ClientTraceId,
+                    Reason: deviceRejectReason)
+                : new SensationCompleted(
+                    Id, _time.GetUtcNow(),
+                    request.SensationId, request.SensationName, request.ClientTraceId);
         }
         catch (OperationCanceledException)
         {

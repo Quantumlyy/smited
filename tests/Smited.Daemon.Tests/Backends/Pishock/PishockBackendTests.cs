@@ -114,23 +114,83 @@ public class PishockBackendTests
     }
 
     [Fact]
-    public async Task TriggerAsync_when_client_rejects_logs_warning_and_continues()
+    public async Task TriggerAsync_when_client_rejects_emits_SensationCancelled_not_Completed()
     {
-        var (backend, client, time) = NewBackend();
+        // The daemon's history and event-stream consumers see
+        // SensationCompleted as "the device fired this sensation
+        // successfully." A device-rejected trigger emitting Completed
+        // would falsely tell consumers the op landed when in fact the
+        // device said no — the operator's history would show "fired"
+        // for sensations that never reached the hardware.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+        });
         await using var __ = backend;
 
         client.NextResult = new PishockOpResult(false, "Not Authorized", "Not Authorized");
+
+        var enumerator = backend.Events.GetAsyncEnumerator();
 
         await backend.TriggerAsync(
             MakeRequest(PishockOp.Vibrate, 200, 30),
             CancellationToken.None);
 
+        var started = await NextWithin(enumerator, TimeSpan.FromSeconds(1));
+        started.Should().BeOfType<SensationStarted>();
+
         await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
         client.Calls.Should().HaveCount(1);
-        // The trigger has already returned Accepted to the coordinator
-        // by the time the client call happens. The device's NO surfaces
-        // as a log line and is documented in pishock.md. A future
-        // refinement could emit a structured BackendError event.
+
+        var ev = await NextWithin(enumerator, TimeSpan.FromSeconds(1));
+        var cancelled = ev.Should().BeOfType<SensationCancelled>().Subject;
+        cancelled.Reason.Should().NotBeNullOrEmpty();
+        cancelled.Reason.Should().Contain("Not Authorized",
+            "the rejection reason should propagate the device's response so operators can triage");
+    }
+
+    [Fact]
+    public async Task TriggerAsync_aborts_remaining_pulses_when_one_is_rejected_by_device()
+    {
+        // A multi-pulse sensation that fails partway through shouldn't
+        // continue firing the remaining pulses — credentials don't
+        // become valid mid-sequence and an offline device doesn't
+        // come back. Subsequent calls would just generate more
+        // rejected wire traffic.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            MaxBurst = 5,
+        });
+        await using var __ = backend;
+
+        client.NextResult = new PishockOpResult(false, "Not Authorized", "Not Authorized");
+
+        var request = new BackendTriggerRequest(
+            SensationId: "seq",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[]
+            {
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 0),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 100),
+                BuildMicro(PishockOp.Vibrate, 100, 30, delayBeforeMs: 100),
+            });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+        // Pump another second of fake time so the buggy "log warning
+        // and continue" path would have time to call the client for
+        // pulses 2 and 3. With the fix, aborting on rejection means
+        // those calls never fire.
+        await PumpUntil(() => false, time, TimeSpan.FromSeconds(1));
+
+        client.Calls.Should().HaveCount(1);
     }
 
     [Fact]
@@ -347,6 +407,20 @@ public class PishockBackendTests
                 TimeSpan.FromMilliseconds(delayBeforeMs));
         }
         return new MicrosensationParameters(values);
+    }
+
+    private static async Task<BackendEvent> NextWithin(
+        IAsyncEnumerator<BackendEvent> enumerator, TimeSpan timeout)
+    {
+        var task = enumerator.MoveNextAsync().AsTask();
+        var winner = await Task.WhenAny(task, Task.Delay(timeout));
+        if (winner != task)
+        {
+            throw new TimeoutException($"No event in {timeout}");
+        }
+        var ok = await task;
+        if (!ok) throw new InvalidOperationException("Stream completed unexpectedly");
+        return enumerator.Current;
     }
 
     /// <summary>
