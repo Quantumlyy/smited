@@ -57,6 +57,12 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Pattern: the await-foreach loop runs on a background thread (so
+        // the bus's blocking ReadAllAsync doesn't tie up the dispatcher),
+        // but any mutation of component state visible to render must
+        // happen inside InvokeAsync so it serializes against the
+        // renderer's @foreach walks. _rows is the only such state in
+        // this component.
         var initial = await History.GetRecentAsync(Limit);
         foreach (var t in initial)
         {
@@ -77,9 +83,12 @@
                     };
                     if (row is null) continue;
 
-                    _rows.AddFirst(row);
-                    while (_rows.Count > Limit) _rows.RemoveLast();
-                    await InvokeAsync(StateHasChanged);
+                    await InvokeAsync(() =>
+                    {
+                        _rows.AddFirst(row);
+                        while (_rows.Count > Limit) _rows.RemoveLast();
+                        StateHasChanged();
+                    });
                 }
             }
             catch (OperationCanceledException) { }
