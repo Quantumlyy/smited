@@ -97,11 +97,22 @@
 
     private void Toggle(string rowKey) => _expanded = _expanded == rowKey ? null : rowKey;
 
+    /// <summary>
+    /// Backfill rows label the acceptance outcome only — the trigger
+    /// record doesn't know whether the sensation completed normally,
+    /// was cancelled, or failed mid-flight. <c>Accepted</c> is honest;
+    /// <c>Completed</c> would be a lie.
+    /// </summary>
+    internal static string StatusFromRecord(TriggerRecord t) =>
+        t.Accepted ? "Accepted" : "Rejected";
+
     private static string PillFor(string status) => status switch
     {
         "Completed" => "pill pill-ok",
         "Cancelled" => "pill pill-warn",
         "Failed"    => "pill pill-err",
+        "Rejected"  => "pill pill-err",
+        "Accepted"  => "pill pill-mute",
         _           => "pill pill-mute",
     };
 
@@ -132,19 +143,29 @@
         string TraceId,
         string Detail)
     {
+        // TriggerRecord is an *acceptance* record (written when the
+        // coordinator accepts the trigger, before the sensation actually
+        // runs). Whether it ultimately completed, was cancelled, or
+        // failed lives in the lifecycle stream — which the live event
+        // loop already renders accurately. Backfill rows therefore
+        // label the acceptance outcome honestly: "Accepted" or
+        // "Rejected", not "Completed" / "Failed". A future change can
+        // join the Triggers table with the Lifecycle table to surface
+        // the final outcome on backfill rows too.
         public static RowVm FromRecord(TriggerRecord t) => new(
             RowKey: $"db-{t.Id}",
             Timestamp: t.Timestamp,
             BackendId: t.BackendId,
             SensationName: t.SensationName,
-            Status: t.Accepted ? "Completed" : "Failed",
+            Status: StatusFromRecord(t),
             TraceId: t.ClientTraceId,
             Detail: $"sensation_id={t.SensationId}\n" +
                     $"zones={t.ZoneIdsJson}\n" +
                     $"intensity_scale={t.IntensityScale?.ToString() ?? "<none>"}\n" +
                     $"priority={t.Priority}\n" +
                     $"trace={t.ClientTraceId}\n" +
-                    (t.ErrorCode is null ? "" : $"error={t.ErrorCode} field={t.ErrorField ?? "<none>"}\n"));
+                    (t.ErrorCode is null ? "" : $"error={t.ErrorCode} field={t.ErrorField ?? "<none>"}\n") +
+                    (t.Accepted ? "NOTE: outcome unknown after restart — backfilled from acceptance record.\n" : ""));
 
         public static RowVm FromCompleted(SensationCompleted c) => new(
             RowKey: $"evt-{c.SensationId}",
