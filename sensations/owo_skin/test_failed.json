@@ -6,7 +6,7 @@
   "tags": ["build", "test", "failure"],
   "default_zone_ids": ["abdominal_l", "abdominal_r"],
   "default_intensity": 75,
-  "estimated_duration": "0.6s",
+  "estimated_duration": "0.58s",
   "definition": {
     "microsensations": [
       {

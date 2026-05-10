@@ -6,7 +6,7 @@
   "tags": ["chat", "mention", "priority"],
   "default_zone_ids": ["arm_l"],
   "default_intensity": 70,
-  "estimated_duration": "0.25s",
+  "estimated_duration": "0.23s",
   "definition": {
     "microsensations": [
       {

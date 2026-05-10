@@ -6,7 +6,7 @@
   "tags": ["build", "error", "severe"],
   "default_zone_ids": ["pectoral_l", "pectoral_r"],
   "default_intensity": 90,
-  "estimated_duration": "0.8s",
+  "estimated_duration": "0.77s",
   "definition": {
     "microsensations": [
       {

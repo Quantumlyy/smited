@@ -6,7 +6,7 @@
   "tags": ["build", "deploy", "success"],
   "default_zone_ids": ["dorsal_l", "dorsal_r"],
   "default_intensity": 45,
-  "estimated_duration": "0.5s",
+  "estimated_duration": "0.6s",
   "definition": {
     "microsensations": [
       {
