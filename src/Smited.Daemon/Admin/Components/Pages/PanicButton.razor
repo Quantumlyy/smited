@@ -22,12 +22,16 @@
         try
         {
             await Actions.PanicAsync(TriggerSource.Admin, peer: null, userAgent: null, default);
+            // Only count successful panics. The "Panic fired N times"
+            // label is meant to confirm the operator's button press
+            // actually stopped sensations — counting failed attempts
+            // would lie about the daemon's effective state.
+            PanicCounter.Increment();
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Admin panic-button stop failed");
         }
-        PanicCounter.Increment();
         StateHasChanged();
     }
 }
