@@ -1,0 +1,21 @@
+{
+  "name": "notification",
+  "backend_kind": "pishock",
+  "display_name": "Notification",
+  "description": "Short beep — generic notification cue.",
+  "tags": ["notification"],
+  "default_zone_ids": ["shock"],
+  "default_intensity": 30,
+  "estimated_duration": "0.1s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "op":        { "enum_value": "Beep" },
+          "duration":  { "duration":   "0.1s" },
+          "intensity": { "number":     30 }
+        }
+      }
+    ]
+  }
+}
