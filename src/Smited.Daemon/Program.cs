@@ -47,6 +47,13 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
+// OwoBackend (when enabled) is loaded reflectively in BackendBootstrapper and
+// constructed via ActivatorUtilities.CreateInstance, which resolves its
+// OwoBackendOptions parameter from the container. Surfacing the nested options
+// here lets the OWO backend stay decoupled from SmitedOptions/IOptions<T>.
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<IOptions<SmitedOptions>>().Value.Backends.Owo);
+
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE
 // BackendBootstrapper publishes its initial registration events —
