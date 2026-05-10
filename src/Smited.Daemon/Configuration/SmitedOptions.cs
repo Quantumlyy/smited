@@ -30,6 +30,13 @@ public sealed class SmitedOptions
 
     public BackendsOptions Backends { get; set; } = new();
 
+    /// <summary>
+    /// Daemon-internal bodymap configuration: declared zone placements
+    /// and overlap policy. Defaults to empty (unmapped mode); see
+    /// <see cref="BodyMapOptions"/> for shape.
+    /// </summary>
+    public BodyMapOptions BodyMap { get; set; } = new();
+
     public SensationsOptions Sensations { get; set; } = new();
 
     public EventBusOptions EventBus { get; set; } = new();
@@ -38,14 +45,15 @@ public sealed class SmitedOptions
 
     public sealed class BackendsOptions
     {
-        public bool EnableMockOwo { get; set; } = true;
-        public bool EnableOwo { get; set; }
-
         /// <summary>
-        /// Configuration for the real OWO Skin backend, used when
-        /// <see cref="EnableOwo"/> is <c>true</c> on a Windows host.
+        /// Backend descriptors to bring online at startup. Each entry
+        /// names a kind and an instance id; the daemon resolves the
+        /// matching <c>IBackendFactory</c> and lets it construct the
+        /// backend. Per-instance configuration sits under the entry's
+        /// <c>Options</c> sub-section, addressed by the bootstrapper as
+        /// <c>Smited:Backends:Items:{i}:Options</c>.
         /// </summary>
-        public OwoBackendOptions Owo { get; set; } = new();
+        public List<BackendDescriptor> Items { get; set; } = new();
     }
 
     public sealed class SensationsOptions

@@ -21,48 +21,59 @@ public class OwoBackendOptionsTests
     }
 
     [Fact]
-    public void All_fields_round_trip_through_the_configuration_binder()
+    public void All_fields_round_trip_through_the_descriptor_options_section()
     {
+        // OwoBackendOptions now lives under a per-descriptor Options
+        // sub-section rather than the legacy Smited:Backends:Owo path.
+        // The OwoBackendFactory binds the matching section directly.
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Smited:Backends:Owo:BackendId"] = "owo-secondary",
-                ["Smited:Backends:Owo:GameDisplayName"] = "alt name",
-                ["Smited:Backends:Owo:ManualIp"] = "192.168.1.7",
-                ["Smited:Backends:Owo:MaxReconnectAttempts"] = "7",
-                ["Smited:Backends:Owo:HeartbeatSeconds"] = "12",
+                ["Smited:Backends:Items:0:Kind"] = "owo_skin",
+                ["Smited:Backends:Items:0:Id"] = "owo-secondary",
+                ["Smited:Backends:Items:0:Options:BackendId"] = "owo-secondary",
+                ["Smited:Backends:Items:0:Options:GameDisplayName"] = "alt name",
+                ["Smited:Backends:Items:0:Options:ManualIp"] = "192.168.1.7",
+                ["Smited:Backends:Items:0:Options:MaxReconnectAttempts"] = "7",
+                ["Smited:Backends:Items:0:Options:HeartbeatSeconds"] = "12",
             })
             .Build();
 
-        var bound = configuration.GetSection("Smited").Get<SmitedOptions>();
+        var bound = configuration
+            .GetSection("Smited:Backends:Items:0:Options")
+            .Get<OwoBackendOptions>();
 
         bound.Should().NotBeNull();
-        bound!.Backends.Owo.BackendId.Should().Be("owo-secondary");
-        bound.Backends.Owo.GameDisplayName.Should().Be("alt name");
-        bound.Backends.Owo.ManualIp.Should().Be("192.168.1.7");
-        bound.Backends.Owo.MaxReconnectAttempts.Should().Be(7);
-        bound.Backends.Owo.HeartbeatSeconds.Should().Be(12);
+        bound!.BackendId.Should().Be("owo-secondary");
+        bound.GameDisplayName.Should().Be("alt name");
+        bound.ManualIp.Should().Be("192.168.1.7");
+        bound.MaxReconnectAttempts.Should().Be(7);
+        bound.HeartbeatSeconds.Should().Be(12);
     }
 
     [Fact]
-    public void Defaults_apply_when_section_is_omitted()
+    public void Defaults_apply_when_options_section_is_omitted()
     {
+        // A descriptor without an Options sub-section: the factory
+        // falls back to `new OwoBackendOptions()`, so every field reads
+        // the type's default value.
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Smited:Backends:EnableOwo"] = "true",
+                ["Smited:Backends:Items:0:Kind"] = "owo_skin",
+                ["Smited:Backends:Items:0:Id"] = "owo-primary",
             })
             .Build();
 
-        var bound = configuration.GetSection("Smited").Get<SmitedOptions>();
+        var bound = configuration
+            .GetSection("Smited:Backends:Items:0:Options")
+            .Get<OwoBackendOptions>() ?? new OwoBackendOptions();
 
-        bound.Should().NotBeNull();
-        bound!.Backends.EnableOwo.Should().BeTrue();
-        bound.Backends.Owo.BackendId.Should().Be("owo-primary");
-        bound.Backends.Owo.GameDisplayName.Should().Be("smited haptic daemon");
-        bound.Backends.Owo.ManualIp.Should().BeNull();
-        bound.Backends.Owo.MaxReconnectAttempts.Should().Be(3);
-        bound.Backends.Owo.HeartbeatSeconds.Should().Be(5);
+        bound.BackendId.Should().Be("owo-primary");
+        bound.GameDisplayName.Should().Be("smited haptic daemon");
+        bound.ManualIp.Should().BeNull();
+        bound.MaxReconnectAttempts.Should().Be(3);
+        bound.HeartbeatSeconds.Should().Be(5);
     }
 
     [Theory]

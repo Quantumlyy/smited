@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Sensations;
 using Smited.Daemon.Tests.Fixtures;
@@ -122,7 +123,7 @@ public class ConcurrencyPolicyTests
         registry.Register(backend);
 
         var coordinator = new TriggerCoordinator(
-            registry, library, concurrency, time,
+            registry, library, concurrency, new BodyMapState(), time,
             NullLogger<TriggerCoordinator>.Instance);
 
         return new System(coordinator, backend, time);
@@ -177,6 +178,8 @@ public class ConcurrencyPolicyTests
         public ConcurrencyModel Concurrency { get; }
         public CalibrationState? Calibration => null;
         public Google.Protobuf.WellKnownTypes.Struct? Extras => null;
+        public IReadOnlySet<Smited.Daemon.BodyMap.BodyRegion> ForbiddenRegions { get; } =
+            global::System.Collections.Immutable.ImmutableHashSet<Smited.Daemon.BodyMap.BodyRegion>.Empty;
 
         public BackendTriggerRequest? LastRequest { get; private set; }
 
