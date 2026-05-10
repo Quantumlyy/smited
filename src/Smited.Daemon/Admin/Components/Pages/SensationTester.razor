@@ -66,12 +66,20 @@
     // override" and "override to max" — see Round-N+2 fix #1.
     private uint? _intensityScalePct;
     private int _priority;
-    private string _traceId = Guid.NewGuid().ToString("n");
+    // The auto-generated GUID we last seeded the trace-id field with.
+    // After a successful fire we only roll the field forward when it
+    // still matches this — i.e. the user didn't type a value of their
+    // own. Repeating the same user-typed trace id across multiple fires
+    // is a real workflow ("trigger this sensation three times under
+    // the same trace") that an unconditional regenerate would break.
+    private string _autoTraceId = Guid.NewGuid().ToString("n");
+    private string _traceId = "";
     private IReadOnlyList<RegisteredSensation> _sensations = Array.Empty<RegisteredSensation>();
     private FireResult? _lastResult;
 
     protected override void OnInitialized()
     {
+        _traceId = _autoTraceId;
         _selectedBackendId = Registry.All.FirstOrDefault()?.Id;
         ReloadSensations();
         _selectedSensationName = _sensations.FirstOrDefault()?.Name;
@@ -121,9 +129,16 @@
             _lastResult = new FireResult(false, $"exception: {ex.GetType().Name}: {ex.Message}");
         }
 
-        // Roll the trace ID after each fire so the next press uses a fresh
-        // value unless the user typed one in.
-        _traceId = Guid.NewGuid().ToString("n");
+        // Roll the trace ID after each fire so the next press uses a
+        // fresh value, unless the user typed their own value in. We
+        // detect that by checking whether the field still matches the
+        // last GUID we auto-seeded; if it doesn't, the user wants
+        // their own trace id to persist across repeat fires.
+        if (string.Equals(_traceId, _autoTraceId, StringComparison.Ordinal))
+        {
+            _autoTraceId = Guid.NewGuid().ToString("n");
+            _traceId = _autoTraceId;
+        }
     }
 
     /// <summary>
