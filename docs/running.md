@@ -199,6 +199,34 @@ To run with no backends at all (uncommon — the daemon's gRPC surface will repo
 
 The `Enabled: false` keeps the descriptor from tripping the "no factory registered for kind" warning at registration time; the validator itself only requires `Kind` and `Id` to be present.
 
+### Keeping disabled-but-documented hardware around
+
+A useful workflow for development: keep a disabled descriptor for a real backend you're occasionally testing against, alongside the enabled mock. Toggle `Enabled` to flip between mock-only and mock-plus-real without re-typing the descriptor each time:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        { "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true },
+        {
+          "Kind": "owo_skin",
+          "Id": "owo-primary",
+          "Enabled": false,
+          "Options": {
+            "GameDisplayName": "smited (dev)"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+> **Place this in your user config**, not in `appsettings.Development.json`. .NET configuration merges array children **by index** across configuration sources, so a sample `Items[1]` in the layer file silently appends to user-supplied arrays. A user whose own config has only `Items[0]` would inherit the layer file's `Items[1]` as a ghost entry, often producing duplicate ids and aborting startup. User config (`~/.config/smited/config.json` on macOS/Linux, `%APPDATA%\smited\config.json` on Windows) is the right home for sample shapes you want to copy and edit.
+
+The validator's "at most one enabled descriptor of a singleton kind" rule applies to enabled entries only — keeping a disabled `owo_skin` alongside a different enabled `owo_skin` does not trip that check, because the disabled descriptor never reaches the factory.
+
 ### Migrating from the legacy Smited:Backends boolean knobs
 
 Pre-v0.2, `Smited:Backends` accepted boolean toggles:
