@@ -34,13 +34,14 @@ public sealed class BhapticsBackend : IHapticBackend
     private readonly Channel<BackendEvent> _events = Channel.CreateUnbounded<BackendEvent>();
     private readonly ConcurrentDictionary<string, ActivePlayback> _playbacks =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly ZoneTopology _zones;
     private readonly ParameterSchema _parameters;
     private readonly ConcurrencyModel _concurrency;
 
+    private ZoneTopology _zones;
     private PlayerClient? _client;
     private BackendStatus _status = BackendStatus.Disconnected;
     private ProtoStruct? _extras;
+    private bool _accessoriesAdvertised;
 
     public BhapticsBackend(
         BhapticsBackendOptions options,
@@ -238,7 +239,30 @@ public sealed class BhapticsBackend : IHapticBackend
     private void OnDeviceStatusChanged(IReadOnlyList<DeviceStatus> devices)
     {
         _extras = BuildExtras(devices);
+
+        // bHaptics Player pushes a deviceStatus frame whenever paired
+        // hardware changes (and as a periodic heartbeat). Reconcile our
+        // advertised topology with what the Player reports: if any
+        // TactSleeve / TactGlove is connected, expand to include their
+        // motor zones; otherwise revert to vest-only. Re-emit a
+        // BackendLifecycleEvent only when the advertised set actually
+        // changes — heartbeat frames with the same membership are
+        // ignored.
+        var hasAccessory = devices.Any(d => d.Connected && IsAccessoryPosition(d.Position));
+        if (hasAccessory == _accessoriesAdvertised) return;
+
+        _accessoriesAdvertised = hasAccessory;
+        _zones = BhapticsTopology.BuildZones(accessoriesPresent: hasAccessory);
+        EmitEvent(new BackendLifecycleEvent(
+            Id,
+            _time.GetUtcNow(),
+            BackendLifecycleChange.StatusChanged,
+            BackendSummarySnapshot.Of(this),
+            Reason: hasAccessory ? "accessories_present" : "accessories_absent"));
     }
+
+    private static bool IsAccessoryPosition(Position position) =>
+        position is Position.ForearmL or Position.ForearmR or Position.GloveL or Position.GloveR;
 
     private void OnDisconnected(Exception? terminal)
     {

@@ -41,6 +41,17 @@ Required parameters per microsensation: `intensity` (0..100, %) and `duration` (
 
 See [`sensations/README.md`](../sensations/README.md) for the full file format reference and `Per-backend authoring notes` for how bHaptics interprets these parameters versus OWO.
 
+### Accessories (TactSleeve, TactGlove)
+
+The backend starts with the 40-zone vest topology. When the Player reports a paired TactSleeve or TactGlove via its periodic `deviceStatus` frame, the backend expands its advertised topology to include the corresponding zones (`arm_l_0..3`, `arm_r_0..3` for sleeves; `glove_l_0..5`, `glove_r_0..5` for gloves) plus the `arms` and `gloves` zone groups, and emits a `BackendLifecycleEvent` with `change = STATUS_CHANGED` so subscribed clients re-fetch via `DescribeBackend`. When an accessory disconnects, the topology collapses back to vest-only and emits a second `STATUS_CHANGED`.
+
+Because sample sensations ship with `default_zone_ids` validated at boot against the *current* topology, files targeting accessory zones aren't included in `sensations/bhaptics_tactsuit/` by default — they'd abort startup on hosts without the accessory paired. Two ways to author sleeve/glove-targeting sensations:
+
+1. Pair the accessory before authoring the file, then drop it in `sensations/bhaptics_tactsuit/<name>.json` and restart the daemon. The boot-time validator binds against the expanded topology.
+2. Use the `RegisterSensation` gRPC at runtime once the accessory is connected — `DescribeBackend` reports the expanded zones, `RegisterSensation` validates against the same, and the daemon persists the file with `scope: "id"` so it survives a restart for that backend instance only.
+
+Face and shoes accessories are intentionally out of scope for v0.1.x; the topology and `ZoneIndexMap` would need extension to support them.
+
 ## Wire-protocol notes
 
 smited only emits the `dotMode` pattern type — direct per-motor intensity arrays, one frame per microsensation, sequenced with `Task.Delay` between frames. PathMode (continuous coordinate interpolation) is reserved for future use; pre-authored bHaptics events (the App ID / API Key flow) are intentionally out of scope. This sidesteps the bHaptics developer portal entirely; sensations are authored in smited's own JSON format and compiled to dot patterns at trigger time.
