@@ -29,16 +29,21 @@ internal static class BackendsServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The reflective lookup is wrapped in the same
-    /// <see cref="FileNotFoundException"/>/<see cref="FileLoadException"/>/<see cref="TypeLoadException"/>
-    /// catch as the previous bootstrapper code: <see cref="Type.GetType(string)"/>
-    /// can throw even with the default <c>throwOnError=false</c> when
-    /// the assembly is present but a transitive runtime dependency
-    /// (e.g. OWO.dll) is missing or unloadable. We surface the error
-    /// to <c>Console.Error</c> because the host logger isn't online
-    /// when this runs, and continue without registering — the daemon
-    /// stays up; OWO triggers will be rejected as if the assembly
-    /// were absent.
+    /// The reflective lookup is wrapped in a deliberately broad
+    /// <c>catch (Exception)</c>: <see cref="Type.GetType(string)"/>
+    /// surfaces an open-ended set of failure modes when the assembly
+    /// is present but unusable in this environment
+    /// (<see cref="BadImageFormatException"/> for a wrong-architecture
+    /// DLL, <see cref="FileNotFoundException"/> /
+    /// <see cref="FileLoadException"/> for missing transitive deps,
+    /// <see cref="TypeLoadException"/> /
+    /// <see cref="System.Reflection.ReflectionTypeLoadException"/> for
+    /// type-resolution failures, <see cref="PlatformNotSupportedException"/>
+    /// on a downlevel runtime, etc.). All of them mean the same thing
+    /// — "OWO unavailable here" — and the right response is the
+    /// same: log, register no factory, daemon continues. We surface
+    /// the error to <c>Console.Error</c> because the host logger
+    /// isn't online when this runs.
     /// </para>
     /// <para>
     /// Both the <c>OwoBackendFactory</c> and <c>StaticOwoSdk</c>
@@ -88,13 +93,27 @@ internal static class BackendsServiceCollectionExtensions
             return type;
         }
         catch (Exception ex)
-            when (ex is FileNotFoundException or FileLoadException or TypeLoadException)
         {
+            // Broad catch is intentional. Any failure to resolve the OWO
+            // type means the assembly is unusable in this environment —
+            // missing file, wrong architecture (BadImageFormatException),
+            // missing transitive dependency (FileNotFoundException /
+            // FileLoadException), corrupt PE, type-resolution failure
+            // (TypeLoadException / ReflectionTypeLoadException),
+            // PlatformNotSupportedException on a downlevel runtime, and so
+            // on. The recoverable set is open-ended and the right response
+            // is uniform: register no factory and let the daemon continue
+            // without OWO support. A narrower filter regressed
+            // BadImageFormatException coverage in a previous round and
+            // crashed daemon startup on misconfigured Windows installs.
+            // Don't re-tighten without checking which exception types this
+            // is load-bearing for.
             Console.Error.WriteLine(
                 $"warn: Skipping {shortName} registration; reflective load "
-                + $"threw {ex.GetType().Name}. Likely cause: the Smited.Daemon.Owo "
-                + "assembly is present but its OWO.dll runtime dependency "
-                + $"isn't next to it. Underlying error: {ex.Message}");
+                + $"threw {ex.GetType().Name}. Daemon will continue without "
+                + "OWO support; verify the Smited.Daemon.Owo assembly and "
+                + "OWO.dll runtime files are present and built for the "
+                + $"current architecture. Underlying error: {ex.Message}");
             return null;
         }
     }
