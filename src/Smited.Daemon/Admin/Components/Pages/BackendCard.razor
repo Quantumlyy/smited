@@ -6,7 +6,7 @@
 @*  Per-backend card. Shows id/kind/displayname, status pill, capabilities,
     calibration status, concurrency model, zone counts, and live in-flight
     sensation count. The "Stop all" button calls
-    TriggerCoordinator.StopBackendAsync(Id).  *@
+    SmitedActionService.StopBackendAsync.  *@
 
 <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center">
@@ -16,7 +16,7 @@
         </div>
         <div>
             <span class="pill @StatusPillClass">@StatusLabel</span>
-            <button class="btn-primary" style="margin-left:0.5rem" @onclick="StopAll">Stop all@(_inFlight > 0 ? $" ({_inFlight})" : "")</button>
+            <button class="btn-primary" style="margin-left:0.5rem" @onclick="StopAll">Stop all@(_inFlight.Current > 0 ? $" ({_inFlight.Current})" : "")</button>
         </div>
     </div>
 
@@ -34,7 +34,10 @@
         <div>Calibration: @CalibrationLabel</div>
         <div>Concurrency: @Backend.Concurrency.Policy, max_concurrent=@Backend.Concurrency.MaxConcurrent</div>
         <div>Topology: @Backend.Zones.Zones.Count zones, @Backend.Zones.Groups.Count zone groups</div>
-        <div>In-flight: @Math.Max(0, _inFlight)</div>
+        @* Math.Max as defense in depth — InFlightCounter clamps writes
+           at zero, but a future increment/decrement asymmetry could
+           still drift negative. Render layer never displays one. *@
+        <div>In-flight: @Math.Max(0, _inFlight.Current)</div>
     </div>
 </div>
 
@@ -43,7 +46,7 @@
 
     private readonly CancellationTokenSource _cts = new();
     private Task? _eventLoop;
-    private int _inFlight;
+    private readonly InFlightCounter _inFlight = new();
 
     private string StatusLabel => Backend.Status switch
     {
@@ -89,19 +92,13 @@
 
                     var changed = evt switch
                     {
-                        SensationStarted => Interlocked.Increment(ref _inFlight) >= 0,
-                        SensationCompleted => Interlocked.Decrement(ref _inFlight) >= 0,
-                        SensationCancelled => Interlocked.Decrement(ref _inFlight) >= 0,
+                        SensationStarted => DidWrite(_inFlight.Increment()),
+                        SensationCompleted => DidWrite(_inFlight.DecrementClampedAtZero()),
+                        SensationCancelled => DidWrite(_inFlight.DecrementClampedAtZero()),
                         BackendLifecycleEvent => true,
                         CalibrationChangedEvent => true,
                         _ => false,
                     };
-
-                    // No clamp here — racing the check-then-write under
-                    // contention can stomp a legitimate increment. Display
-                    // clamps via Math.Max(0, _inFlight); if the counter
-                    // drifts negative because we joined the event stream
-                    // mid-flight, it self-heals on the next SensationStarted.
 
                     if (changed) await InvokeAsync(StateHasChanged);
                 }
@@ -132,6 +129,14 @@
         // close); with it, an unmounted card releases immediately.
         await Events.DisposeAsync();
     }
+
+    // Always-true helper so the pattern-match expression can call the
+    // counter mutation methods (which return ints) and feed the bool
+    // switch arm. We render on every Started/Completed/Cancelled event
+    // regardless of whether the counter actually moved (a Completed at
+    // zero is a no-op on the counter but the renderer still shows the
+    // event ordering downstream).
+    private static bool DidWrite(int _) => true;
 
     private static string FormatAgo(TimeSpan t) =>
         t.TotalHours >= 1 ? $"{(int)t.TotalHours}h" :
