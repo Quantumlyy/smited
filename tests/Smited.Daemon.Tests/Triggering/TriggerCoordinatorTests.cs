@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Sensations;
 using Smited.Daemon.Tests.Fixtures;
@@ -272,6 +273,7 @@ public class TriggerCoordinatorTests
             registry,
             library,
             concurrency,
+            new BodyMapState(),
             time,
             NullLogger<TriggerCoordinator>.Instance);
 

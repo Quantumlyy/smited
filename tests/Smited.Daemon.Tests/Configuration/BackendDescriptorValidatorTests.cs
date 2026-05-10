@@ -1,0 +1,230 @@
+using FluentAssertions;
+using Smited.Daemon.Configuration;
+using Xunit;
+
+namespace Smited.Daemon.Tests.Configuration;
+
+public class BackendDescriptorValidatorTests
+{
+    [Fact]
+    public void Empty_list_has_no_errors()
+    {
+        BackendDescriptorValidator.Validate(Array.Empty<BackendDescriptor>())
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Well_formed_descriptors_pass()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-owo" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Empty_kind_is_rejected()
+    {
+        var descriptors = new[] { new BackendDescriptor { Id = "mock-owo" } };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().ContainSingle(e => e.Contains("Kind is required"));
+    }
+
+    [Fact]
+    public void Empty_id_is_rejected()
+    {
+        var descriptors = new[] { new BackendDescriptor { Kind = "mock_owo" } };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().ContainSingle(e => e.Contains("Id is required"));
+    }
+
+    [Theory]
+    [InlineData("Mock-Owo")]      // uppercase
+    [InlineData("-leading-dash")] // leading dash
+    [InlineData("under_score_ok")] // valid
+    [InlineData("dash-ok")]        // valid
+    [InlineData("with space")]    // space
+    [InlineData("dot.in.id")]     // dots
+    public void Id_is_validated_against_ident_regex(string id)
+    {
+        var descriptors = new[] { new BackendDescriptor { Kind = "mock_owo", Id = id } };
+
+        var errors = BackendDescriptorValidator.Validate(descriptors);
+
+        var idIsValid = id == "under_score_ok" || id == "dash-ok";
+        if (idIsValid)
+        {
+            errors.Should().BeEmpty();
+        }
+        else
+        {
+            errors.Should().ContainSingle(e => e.Contains("not a valid identifier"));
+        }
+    }
+
+    [Fact]
+    public void Duplicate_ids_are_rejected_even_across_different_kinds()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "shared" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "shared" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().ContainSingle(e => e.Contains("'shared' is duplicated"));
+    }
+
+    [Fact]
+    public void Duplicate_id_check_is_case_insensitive()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().Contain(e => e.Contains("duplicated"));
+    }
+
+    [Fact]
+    public void Two_mock_owo_descriptors_are_rejected()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-a" },
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-b" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().ContainSingle(e => e.Contains("Kind 'mock_owo' may appear at most once"));
+    }
+
+    [Fact]
+    public void Two_owo_skin_descriptors_are_rejected()
+    {
+        // Generalization of the mock_owo singleton rule. OwoBackend
+        // depends on a static OWOGame.OWO SDK that two instances would
+        // race on, so two owo_skin descriptors must be rejected up
+        // front.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-living-room" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-office" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().ContainSingle(e => e.Contains("Kind 'owo_skin' may appear at most once"));
+    }
+
+    [Fact]
+    public void One_mock_owo_and_one_owo_skin_descriptor_is_allowed()
+    {
+        // Different singleton kinds; not the same SDK contention.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-owo" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void One_enabled_one_disabled_owo_skin_descriptor_is_allowed()
+    {
+        // Documented workflow: keep disconnected hardware config around
+        // disabled. The disabled descriptor never reaches the factory,
+        // so it doesn't conflict with the enabled descriptor's runtime
+        // singleton state. Validator must allow.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary", Enabled = true },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-spare", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'owo_skin'"));
+    }
+
+    [Fact]
+    public void Two_disabled_owo_skin_descriptors_is_allowed()
+    {
+        // Both entries kept around for documentation / future use,
+        // neither active. Validator must allow.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-a", Enabled = false },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-b", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'owo_skin'"));
+    }
+
+    [Fact]
+    public void One_enabled_one_disabled_mock_owo_descriptor_is_allowed()
+    {
+        // Same workflow as owo_skin; cover both singleton kinds.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-owo", Enabled = true },
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-spare", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'mock_owo'"));
+    }
+
+    [Fact]
+    public void Two_disabled_mock_owo_descriptors_is_allowed()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-a", Enabled = false },
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-b", Enabled = false },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().NotContain(e => e.Contains("'mock_owo'"));
+    }
+
+    [Fact]
+    public void Three_owo_skin_descriptors_emit_a_single_error_naming_first_two_indices()
+    {
+        // 3+ duplicates of the same singleton kind only emit one error
+        // (citing the first two indices). The validator's job is to
+        // tell the user "this kind is singleton-only"; piling on more
+        // messages doesn't help fix the config.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-a" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-b" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-c" },
+        };
+
+        var errors = BackendDescriptorValidator.Validate(descriptors);
+
+        errors.Should().ContainSingle(e => e.Contains("'owo_skin'") && e.Contains("[0,1]"));
+    }
+
+    [Fact]
+    public void Multiple_validation_failures_are_all_reported_at_once()
+    {
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "", Id = "" }, // both missing
+            new BackendDescriptor { Kind = "mock_owo", Id = "MOCK" }, // bad id
+        };
+
+        var errors = BackendDescriptorValidator.Validate(descriptors);
+
+        errors.Should().HaveCountGreaterThanOrEqualTo(3);
+    }
+}

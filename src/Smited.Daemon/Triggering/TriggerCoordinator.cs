@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Sensations;
 using Smited.V1;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
@@ -20,6 +21,7 @@ internal sealed class TriggerCoordinator
     private readonly BackendRegistry _registry;
     private readonly SensationLibrary _library;
     private readonly ConcurrencyEnforcer _concurrency;
+    private readonly IBodyMapState _bodyMapState;
     private readonly TimeProvider _time;
     private readonly ILogger<TriggerCoordinator> _logger;
 
@@ -30,12 +32,14 @@ internal sealed class TriggerCoordinator
         BackendRegistry registry,
         SensationLibrary library,
         ConcurrencyEnforcer concurrency,
+        IBodyMapState bodyMapState,
         TimeProvider time,
         ILogger<TriggerCoordinator> logger)
     {
         _registry = registry;
         _library = library;
         _concurrency = concurrency;
+        _bodyMapState = bodyMapState;
         _time = time;
         _logger = logger;
     }
@@ -69,6 +73,22 @@ internal sealed class TriggerCoordinator
         if (validation is not null)
         {
             return Reject(input, validation.Value.Code, validation.Value.Message, validation.Value.Field);
+        }
+
+        // Bodymap overlap rejection. Off / Warn policies don't reject
+        // at trigger time (Warn was already logged at startup); Refuse
+        // surfaces overlaps as INVALID_ZONE.
+        if (_bodyMapState.OverlapPolicy == OverlapPolicy.Refuse)
+        {
+            var overlap = _bodyMapState.CheckOverlap(backend, resolution.ZoneIds);
+            if (overlap is not null)
+            {
+                return Reject(input,
+                    TriggerErrorCode.InvalidZone,
+                    $"zone '{overlap.ZoneId}' overlaps region '{overlap.Region}' "
+                    + $"already covered by backend '{overlap.OtherBackendId}'",
+                    "zone_ids");
+            }
         }
 
         var sensationId = Guid.NewGuid().ToString("N")[..16];

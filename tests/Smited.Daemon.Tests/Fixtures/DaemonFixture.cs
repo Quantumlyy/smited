@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Events;
 using Smited.Daemon.History;
 using Smited.Daemon.Sensations;
@@ -38,7 +39,8 @@ internal sealed class DaemonFixture : IDisposable
     public DaemonFixture(
         Action<string>? seed = null,
         Action<IServiceCollection>? configureServices = null,
-        string? libraryRoot = null)
+        string? libraryRoot = null,
+        IReadOnlyDictionary<string, string?>? additionalConfig = null)
     {
         _libraryRoot = libraryRoot ?? Path.Combine(Path.GetTempPath(), "smited-fixture-" + Guid.NewGuid().ToString("N"));
         _ownsLibraryRoot = libraryRoot is null;
@@ -60,18 +62,33 @@ internal sealed class DaemonFixture : IDisposable
                 builder.UseEnvironment("Testing");
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    // The fixture intentionally does NOT pre-populate
+                    // Smited:Backends:Items here. The bootstrapper's
+                    // empty-Items fallback synthesizes a default mock-owo
+                    // descriptor at startup, which gives every E2E test
+                    // mock-owo for free without the fixture leaking a
+                    // shape that the production daemon doesn't ship in
+                    // appsettings.json. Tests that need additional or
+                    // alternative descriptors layer them on via
+                    // `additionalConfig`.
+                    var baseConfig = new Dictionary<string, string?>
                     {
                         ["Smited:GrpcPort"] = "0",
                         ["Smited:PanicPort"] = "0",
                         ["Smited:BindAddress"] = "127.0.0.1",
                         ["Smited:Sensations:LibraryRoot"] = _libraryRoot,
-                        ["Smited:Backends:EnableMockOwo"] = "true",
-                        ["Smited:Backends:EnableOwo"] = "false",
                         ["Smited:History:Enabled"] = "true",
                         ["Smited:History:CustomPath"] = Path.Combine(_libraryRoot, "history.db"),
                         ["Serilog:MinimumLevel"] = "Warning",
-                    });
+                    };
+                    if (additionalConfig is not null)
+                    {
+                        foreach (var (key, value) in additionalConfig)
+                        {
+                            baseConfig[key] = value;
+                        }
+                    }
+                    config.AddInMemoryCollection(baseConfig);
                 });
                 builder.ConfigureTestServices(services =>
                 {
@@ -82,26 +99,53 @@ internal sealed class DaemonFixture : IDisposable
             });
 
         // Force the host to boot so backends register and sensations load
-        // before the first test method touches the fixture.
-        var handler = _factory.Server.CreateHandler();
-        PanicHttpClient = new HttpClient(handler)
+        // before the first test method touches the fixture. Wrapped in
+        // try/catch so a boot failure (e.g. invalid descriptor config)
+        // doesn't leak the env-var override or the temp library root —
+        // the test that intentionally provokes the failure asserts on
+        // the exception and then xunit moves on without ever calling
+        // Dispose.
+        try
         {
-            BaseAddress = _factory.Server.BaseAddress,
-            DefaultRequestVersion = new Version(1, 1),
-        };
+            var handler = _factory.Server.CreateHandler();
+            PanicHttpClient = new HttpClient(handler)
+            {
+                BaseAddress = _factory.Server.BaseAddress,
+                DefaultRequestVersion = new Version(1, 1),
+            };
 
-        var grpcHandler = _factory.Server.CreateHandler();
-        var grpcHttp = new HttpClient(new ForceHttp2Handler(grpcHandler))
+            var grpcHandler = _factory.Server.CreateHandler();
+            var grpcHttp = new HttpClient(new ForceHttp2Handler(grpcHandler))
+            {
+                BaseAddress = _factory.Server.BaseAddress,
+                DefaultRequestVersion = new Version(2, 0),
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+            };
+            Channel = GrpcChannel.ForAddress(_factory.Server.BaseAddress, new GrpcChannelOptions
+            {
+                HttpClient = grpcHttp,
+            });
+            Client = new SmitedService.SmitedServiceClient(Channel);
+        }
+        catch
         {
-            BaseAddress = _factory.Server.BaseAddress,
-            DefaultRequestVersion = new Version(2, 0),
-            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
-        };
-        Channel = GrpcChannel.ForAddress(_factory.Server.BaseAddress, new GrpcChannelOptions
+            CleanUpAfterFailedBoot();
+            throw;
+        }
+    }
+
+    private void CleanUpAfterFailedBoot()
+    {
+        try { _factory.Dispose(); } catch { }
+        Environment.SetEnvironmentVariable("SMITED_CONFIG_DIR", _previousUserConfigDir);
+        try
         {
-            HttpClient = grpcHttp,
-        });
-        Client = new SmitedService.SmitedServiceClient(Channel);
+            if (_ownsLibraryRoot && Directory.Exists(_libraryRoot))
+            {
+                Directory.Delete(_libraryRoot, recursive: true);
+            }
+        }
+        catch { }
     }
 
     /// <summary>The shared <see cref="FakeTimeProvider"/>.</summary>
@@ -132,6 +176,14 @@ internal sealed class DaemonFixture : IDisposable
 
     /// <summary>The mock backend's controller surface.</summary>
     public IMockOwoController MockController => _factory.Services.GetRequiredService<IMockOwoController>();
+
+    /// <summary>
+    /// Bodymap state populated by <c>BackendBootstrapper</c> after the
+    /// validator runs. Exposes <see cref="IBodyMapState.RefusedBackendCount"/>
+    /// (the value the startup banner reads), <see cref="IBodyMapState.PlacementCount"/>,
+    /// and <see cref="IBodyMapState.WarningCount"/>.
+    /// </summary>
+    public IBodyMapState BodyMapState => _factory.Services.GetRequiredService<IBodyMapState>();
 
     /// <summary>
     /// Factory for the in-process SQLite history database, so tests can
