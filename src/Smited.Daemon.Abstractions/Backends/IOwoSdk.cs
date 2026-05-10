@@ -70,15 +70,18 @@ public interface IOwoSdk
 /// <c>StaticOwoSdk</c> so this record stays free of SDK types.
 /// </summary>
 /// <remarks>
-/// All time fields are <strong>seconds</strong>. The OWO SDK's
-/// <c>SensationsFactory.Create(...)</c> takes seconds for both ramps,
-/// despite some older docs labelling them as milliseconds — the
-/// implementation here matches the v2.4.x signature.
+/// Field types match the OWO SDK 2.4.x signature for
+/// <c>SensationsFactory.Create</c>: <c>frequency</c> and
+/// <c>intensity</c> are <c>int</c>; durations are <c>float</c> seconds.
+/// (The SDK parameter for ramps is named <c>rampUpMillis</c> in the
+/// reflection metadata but the real-world callers pass second values
+/// like <c>0.1f</c>; treat the name as an SDK misnomer and document
+/// the units here.)
 /// </remarks>
 public sealed record OwoSendCommand(
-    float FrequencyHz,
+    int FrequencyHz,
     float DurationSeconds,
-    float IntensityPercentage,
+    int IntensityPercentage,
     float RampUpSeconds,
     float RampDownSeconds,
     float ExitDelaySeconds,

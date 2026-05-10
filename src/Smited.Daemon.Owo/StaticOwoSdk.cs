@@ -34,30 +34,34 @@ public sealed class StaticOwoSdk : IOwoSdk
     }
 
     /// <inheritdoc />
-    public Task ConnectAsync(string ip) => OWO.Connect(ip);
+    public Task ConnectAsync(string ip) => OWO.Connect(new[] { ip });
 
     /// <inheritdoc />
     public Task AutoConnectAsync() => OWO.AutoConnect();
 
     /// <inheritdoc />
-    public bool IsConnected => OWO.IsConnected;
+    public bool IsConnected => OWO.ConnectionState == ConnectionState.Connected;
 
     /// <inheritdoc />
     public void Send(OwoSendCommand command)
     {
-        // SDK signature (v2.4.x): SensationsFactory.Create takes all
-        // floats — frequency in Hz, duration/exitDelay in seconds,
-        // intensity as a 0..100 percentage, ramps in seconds.
+        // OWO SDK 2.4.x SensationsFactory.Create signature (verified by
+        // reflecting the package's lib/net6.0/OWO.dll):
+        //   MicroSensation Create(int frequency, float durationSeconds,
+        //       int intensityPercentage, float rampUpMillis,
+        //       float rampDownMillis, float exitDelaySeconds)
+        // Positional dispatch sidesteps any parameter-name churn between
+        // SDK versions.
         var sensation = SensationsFactory.Create(
-            frequency: command.FrequencyHz,
-            duration: command.DurationSeconds,
-            intensity: command.IntensityPercentage,
-            rampUp: command.RampUpSeconds,
-            rampDown: command.RampDownSeconds,
-            exitDelay: command.ExitDelaySeconds);
+            command.FrequencyHz,
+            command.DurationSeconds,
+            command.IntensityPercentage,
+            command.RampUpSeconds,
+            command.RampDownSeconds,
+            command.ExitDelaySeconds);
 
         var muscles = OwoMuscleMap.Resolve(command.ZoneIds);
-        OWO.Send(sensation.WithMuscles(muscles));
+        OWO.Send(sensation, muscles);
     }
 
     /// <inheritdoc />

@@ -665,10 +665,13 @@ public sealed class OwoBackend : IHapticBackend
         }
         intensity = Math.Clamp(intensity, 0, 100);
 
+        // OWO SDK takes int frequency and int intensity; round to int
+        // here so the command's contract matches the SDK without any
+        // narrowing happening inside StaticOwoSdk.
         return new OwoSendCommand(
-            FrequencyHz: (float)frequency,
+            FrequencyHz: (int)Math.Round(frequency),
             DurationSeconds: duration,
-            IntensityPercentage: (float)intensity,
+            IntensityPercentage: (int)Math.Round(intensity),
             RampUpSeconds: rampUp,
             RampDownSeconds: rampDown,
             ExitDelaySeconds: exitDelay,

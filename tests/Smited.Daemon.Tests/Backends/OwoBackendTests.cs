@@ -202,8 +202,7 @@ public class OwoBackendTests
         await backend.B.TriggerAsync(request, CancellationToken.None);
         await Task.Delay(50);
 
-        backend.Sdk.Received(1).Send(Arg.Is<OwoSendCommand>(c =>
-            Math.Abs(c.IntensityPercentage - 40f) < 0.001f));
+        backend.Sdk.Received(1).Send(Arg.Is<OwoSendCommand>(c => c.IntensityPercentage == 40));
     }
 
     [Fact]
