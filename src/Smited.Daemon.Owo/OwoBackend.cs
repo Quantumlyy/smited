@@ -53,7 +53,7 @@ public sealed class OwoBackend : IHapticBackend
             SingleReader = true,
             SingleWriter = false,
         });
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSensations =
+    private readonly ConcurrentDictionary<string, ActivePlayback> _activeSensations =
         new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _lifetimeCts;
     private Task? _heartbeatTask;
@@ -260,7 +260,18 @@ public sealed class OwoBackend : IHapticBackend
                 _logger.LogWarning(
                     "OWO backend {Id} transport dropped; sensations will fail until reconnected",
                     Id);
-                _ = TryReconnectAsync(ct);
+                if (_options.MaxReconnectAttempts > 0)
+                {
+                    _ = TryReconnectAsync(ct);
+                }
+                // With MaxReconnectAttempts == 0 the heartbeat loop
+                // continues to poll IsConnected; if the SDK reports a
+                // restored connection on a later tick the Ready branch
+                // above flips Status back. Without this guard we'd
+                // immediately fall into the "exhausted" path of
+                // TryReconnectAsync and stamp Status=Error after a
+                // single tick, which contradicts "disable retries but
+                // stay disconnected".
             }
         }
     }
@@ -335,12 +346,16 @@ public sealed class OwoBackend : IHapticBackend
         var totalDuration = ComputeEstimatedDuration(request);
         var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-        // Stash the CTS keyed by sensation id so StopAsync can target a
-        // specific in-flight sensation. OWO's exclusive concurrency means
-        // there will only be at most one entry here at a time given the
-        // Concurrency.Policy=CANCEL_OLDEST upstream enforcement, but we
-        // still key by id for symmetry with the mock backend.
-        _activeSensations[request.SensationId] = linked;
+        // Stash an ActivePlayback (CTS + a TCS-backed completion signal)
+        // so StopAsync can target a specific in-flight sensation, and so
+        // DisposeAsync can wait for the SensationCancelled event to land
+        // in the channel before tearing it down. OWO's exclusive
+        // concurrency means there will only be at most one entry here at
+        // a time given the Concurrency.Policy=CANCEL_OLDEST upstream
+        // enforcement, but we still key by id for symmetry with the
+        // mock backend.
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _activeSensations[request.SensationId] = new ActivePlayback(linked, completion.Task);
 
         EmitEvent(new SensationStarted(
             Id,
@@ -371,13 +386,26 @@ public sealed class OwoBackend : IHapticBackend
         _ = Task.Run(async () =>
         {
             BackendEvent finalEvent;
+            // anySent gates whether OperationCanceledException needs to
+            // call _sdk.Stop(): if cancellation arrives mid-playback the
+            // device is still vibrating, and only OWO.Stop() silences it.
+            // If cancellation arrives before the first Send (e.g. caller
+            // ct already cancelled), there's nothing on the device yet
+            // and we skip the SDK stop entirely.
+            var anySent = false;
             try
             {
                 for (var i = 0; i < request.Microsensations.Count; i++)
                 {
+                    // Check cancellation BEFORE each Send so a token
+                    // cancelled between iterations doesn't leak one more
+                    // microsensation onto the device.
+                    linked.Token.ThrowIfCancellationRequested();
+
                     var micro = request.Microsensations[i];
                     var command = BuildSendCommand(micro, request);
                     _sdk.Send(command);
+                    anySent = true;
 
                     if (i < request.Microsensations.Count - 1)
                     {
@@ -400,6 +428,19 @@ public sealed class OwoBackend : IHapticBackend
             }
             catch (OperationCanceledException)
             {
+                if (anySent)
+                {
+                    try
+                    {
+                        _sdk.Stop();
+                    }
+                    catch (Exception stopEx)
+                    {
+                        _logger.LogDebug(stopEx,
+                            "OWO backend {Id} threw on Stop() while cancelling {SensationId}",
+                            Id, request.SensationId);
+                    }
+                }
                 finalEvent = new SensationCancelled(
                     Id,
                     _time.GetUtcNow(),
@@ -413,6 +454,11 @@ public sealed class OwoBackend : IHapticBackend
                 _logger.LogWarning(ex,
                     "OWO sensation {SensationId} failed mid-flight",
                     request.SensationId);
+                if (anySent)
+                {
+                    try { _sdk.Stop(); }
+                    catch { /* swallow — already in an error path */ }
+                }
                 finalEvent = new SensationCancelled(
                     Id,
                     _time.GetUtcNow(),
@@ -428,6 +474,11 @@ public sealed class OwoBackend : IHapticBackend
             }
 
             EmitEvent(finalEvent);
+            // Resolve the completion signal AFTER the event lands in the
+            // channel so DisposeAsync awaiting on this task observes the
+            // SensationCancelled event before TryComplete shuts the
+            // channel for further writes.
+            completion.TrySetResult();
         });
         // Deliberately not passing `ct` to Task.Run: if the caller's
         // token is already cancelled (or is cancelled before the thread
@@ -436,7 +487,9 @@ public sealed class OwoBackend : IHapticBackend
         // skip the finally block above and leak the
         // _activeSensations entry plus the linked CTS. Cancellation
         // propagation is already covered inside the delegate via the
-        // linked.Token threaded through every Task.Delay.
+        // linked.Token threaded through every Task.Delay AND the
+        // ThrowIfCancellationRequested() call at the start of each
+        // microsensation iteration.
 
         return Task.FromResult(new BackendTriggerResult(request.SensationId, totalDuration));
     }
@@ -450,19 +503,19 @@ public sealed class OwoBackend : IHapticBackend
 
         if (request.All)
         {
-            foreach (var (id, cts) in _activeSensations)
+            foreach (var (id, _) in _activeSensations)
             {
                 if (_activeSensations.TryRemove(id, out var removed))
                 {
-                    SafeCancel(removed);
+                    SafeCancel(removed.Cts);
                     stopped++;
                 }
             }
         }
         else if (!string.IsNullOrEmpty(request.SensationId)
-            && _activeSensations.TryRemove(request.SensationId, out var cts))
+            && _activeSensations.TryRemove(request.SensationId, out var playback))
         {
-            SafeCancel(cts);
+            SafeCancel(playback.Cts);
             stopped = 1;
         }
 
@@ -515,9 +568,38 @@ public sealed class OwoBackend : IHapticBackend
             }
         }
 
-        foreach (var (_, sensationCts) in _activeSensations)
+        // Snapshot active playbacks BEFORE cancelling so we can await
+        // each one's completion signal. Each playback's TCS is resolved
+        // only after its SensationCancelled event is written to
+        // _events — awaiting here ensures those events make the channel
+        // before TryComplete shuts the writer below.
+        var snapshot = _activeSensations.Values.ToArray();
+        foreach (var playback in snapshot)
         {
-            SafeCancel(sensationCts);
+            SafeCancel(playback.Cts);
+        }
+        foreach (var playback in snapshot)
+        {
+            try
+            {
+                // Bound the wait so a misbehaving SDK can't hang shutdown.
+                // The playback should resolve in milliseconds once its
+                // CTS is cancelled — Task.Delay observes the token
+                // cancellation immediately, the catch block runs and
+                // emits Cancelled, then SetResult fires.
+                await playback.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogDebug(
+                    "OWO backend {Id} playback didn't complete within shutdown timeout; "
+                    + "continuing teardown anyway", Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "OWO backend {Id} playback task threw on shutdown", Id);
+            }
         }
         _activeSensations.Clear();
 
@@ -763,5 +845,14 @@ public sealed class OwoBackend : IHapticBackend
         micro.Values.TryGetValue(key, out var v) && v is ParameterValue.Number n
             ? n.Value
             : defaultValue;
+
+    /// <summary>
+    /// Tracks an in-flight playback's cancellation source plus a
+    /// completion task that fires only after the matching final
+    /// <see cref="BackendEvent"/> (Completed or Cancelled) has been
+    /// written to the event channel. <see cref="DisposeAsync"/> awaits
+    /// these so shutdown doesn't drop end-of-life events.
+    /// </summary>
+    private sealed record ActivePlayback(CancellationTokenSource Cts, Task Task);
 }
 #endif

@@ -316,15 +316,18 @@ public class OwoBackendTests
     }
 
     [Fact]
-    public async Task TriggerAsync_with_pre_cancelled_token_still_emits_Cancelled_and_clears_tracking()
+    public async Task TriggerAsync_with_pre_cancelled_token_skips_Send_and_emits_Cancelled()
     {
-        // Regression for an earlier bug where the dispatch Task.Run was
-        // started with the caller's token. If the gRPC call cancelled
-        // before the thread pool dequeued the delegate, Task.Run
-        // returned a pre-cancelled task without ever running the body —
-        // the `finally` that drains _activeSensations and disposes the
-        // linked CTS never fired, leaking the sensation entry and
-        // skipping the SensationCancelled event.
+        // Two regressions in one test:
+        //   1) Earlier bug: the dispatch Task.Run was started with the
+        //      caller's token, so a pre-cancelled token returned a
+        //      pre-cancelled Task without running the body — leaking
+        //      _activeSensations and skipping SensationCancelled.
+        //   2) Earlier bug: even with the body running, the loop called
+        //      _sdk.Send unconditionally before checking the linked
+        //      token, so a cancelled trigger still poked the device.
+        //      ThrowIfCancellationRequested at the top of each iteration
+        //      fixes that.
         var backend = await NewReadyBackend();
         await using var ____ = backend.B;
 
@@ -339,12 +342,50 @@ public class OwoBackendTests
         (await NextWithin(enumerator, TimeSpan.FromSeconds(1)))
             .Should().BeOfType<SensationCancelled>();
 
-        // Pump once more so the finally block has definitely run.
-        await Task.Delay(20);
+        // No Send on a pre-cancelled trigger and no Stop either — there
+        // was nothing on the device to silence.
+        backend.Sdk.DidNotReceive().Send(Arg.Any<OwoSendCommand>());
+        backend.Sdk.DidNotReceive().Stop();
 
+        // Pump once more so the finally block has definitely run, then
+        // confirm the entry left the active-sensations dict.
+        await Task.Delay(20);
         var stopped = await backend.B.StopAsync(
             new BackendStopRequest("cancelled-pre", All: false), CancellationToken.None);
-        stopped.Should().Be(0); // Already drained, not still tracked.
+        stopped.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TriggerAsync_cancellation_after_first_Send_calls_sdk_Stop()
+    {
+        // If cancellation arrives after a microsensation has already been
+        // dispatched to the SDK, the device is mid-vibration and we have
+        // to call _sdk.Stop() to silence it. (StopAsync's own _sdk.Stop()
+        // call only happens when StopAsync is the cancellation path —
+        // here cancellation is via the caller's CTS directly, simulating
+        // a gRPC client abort mid-flight.)
+        var backend = await NewReadyBackend();
+        await using var ____ = backend.B;
+
+        using var cts = new CancellationTokenSource();
+
+        await backend.B.TriggerAsync(MakeRequest("mid-flight", TimeSpan.FromSeconds(5)), cts.Token);
+
+        // Give the thread pool a chance to dequeue the dispatch loop
+        // and fire the first Send before we cancel.
+        await Task.Delay(50);
+        backend.Sdk.Received(1).Send(Arg.Any<OwoSendCommand>());
+        backend.Sdk.DidNotReceive().Stop();
+
+        cts.Cancel();
+
+        var enumerator = backend.B.Events.GetAsyncEnumerator();
+        (await NextWithin(enumerator, TimeSpan.FromSeconds(1)))
+            .Should().BeOfType<SensationStarted>();
+        (await NextWithin(enumerator, TimeSpan.FromSeconds(1)))
+            .Should().BeOfType<SensationCancelled>();
+
+        backend.Sdk.Received(1).Stop();
     }
 
     private record ReadyBackend(OwoBackend B, IOwoSdk Sdk, FakeTimeProvider Time);
