@@ -2,20 +2,20 @@
   "name": "compile_error_severe",
   "backend_kind": "owo_skin",
   "display_name": "Compile Error (Severe)",
-  "description": "Strong jab to both pectorals — many errors at once.",
+  "description": "Sharp jab across both pectorals — multiple errors, build is broken.",
   "tags": ["build", "error", "severe"],
   "default_zone_ids": ["pectoral_l", "pectoral_r"],
-  "default_intensity": 80,
-  "estimated_duration": "0.6s",
+  "default_intensity": 90,
+  "estimated_duration": "0.8s",
   "definition": {
     "microsensations": [
       {
         "parameters": {
           "frequency": { "number": 100 },
-          "intensity": { "number": 80 },
-          "duration": { "duration": "0.4s" },
-          "ramp_up": { "duration": "0.05s" },
-          "ramp_down": { "duration": "0.15s" }
+          "intensity": { "number": 90 },
+          "duration": { "duration": "0.55s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.2s" }
         }
       }
     ]
