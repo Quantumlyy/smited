@@ -6,6 +6,25 @@
     <AssemblyName>Smited.Daemon.Owo</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      This project only ever builds to target Windows. Setting
+      EnableWindowsTargeting unconditionally lets `dotnet build` /
+      `dotnet publish` succeed when invoked from Mac/Linux hosts (CI,
+      dev machines) without the caller having to pass
+      -p:EnableWindowsTargeting=true. No-op on Windows hosts.
+    -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!--
+      Library projects don't copy NuGet runtime assemblies into bin/
+      by default — that only happens at publish time. The daemon loads
+      this assembly reflectively, so it doesn't trigger a publish step
+      itself; if OWO.dll isn't next to Smited.Daemon.Owo.dll the SDK
+      call fails at runtime. CopyLocalLockFileAssemblies forces the
+      build to lay out every transitive runtime dependency next to the
+      project's primary output, which the daemon's csproj then mirrors
+      into its own bin folder via the ResolveOwoBackendRuntime target.
+    -->
+    <CopyLocalLockFileAssemblies Condition="'$(_TargetingWindows)' == 'true'">true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <!--
@@ -18,25 +37,35 @@
     <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+  </ItemGroup>
+
   <!--
-    OWO is a Windows-native NuGet package; only restore on Windows hosts
-    so `dotnet build` on Mac produces an empty assembly without trying to
-    pull a package that won't load on non-Windows runtimes. Version is
-    centrally managed in Directory.Packages.props.
+    OWO is a Windows-native NuGet package; only restore when targeting
+    Windows so `dotnet build` on Mac produces an empty assembly without
+    trying to pull a package that won't load on non-Windows runtimes.
+    `_TargetingWindows` (defined in Directory.Build.props) is true when
+    either the host is Windows or an explicit win-* RuntimeIdentifier
+    was passed for cross-publish. Version is centrally managed in
+    Directory.Packages.props.
   -->
-  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+  <ItemGroup Condition="'$(_TargetingWindows)' == 'true'">
     <PackageReference Include="OWO" />
   </ItemGroup>
 
   <!--
-    The OwoBackend body uses OWO SDK types unconditionally inside
-    `#if WINDOWS`. Targeting `net9.0-windows` means the WINDOWS symbol
-    is defined regardless of build host, so we exclude the file from
-    compile when building on a non-Windows host where the OWO package
-    isn't restored.
+    OwoBackend, OwoMuscleMap and StaticOwoSdk reference the OWO SDK's
+    `OWOGame` namespace. Targeting `net9.0-windows` means the WINDOWS
+    symbol is defined regardless of build host, so we additionally
+    exclude these files from compile when not targeting Windows so the
+    project builds to an empty assembly without the SDK package. Other
+    files (e.g. cross-platform helpers) compile everywhere.
   -->
-  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+  <ItemGroup Condition="'$(_TargetingWindows)' != 'true'">
     <Compile Remove="OwoBackend.cs" />
+    <Compile Remove="OwoMuscleMap.cs" />
+    <Compile Remove="StaticOwoSdk.cs" />
   </ItemGroup>
 
 </Project>

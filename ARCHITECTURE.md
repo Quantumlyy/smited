@@ -105,11 +105,12 @@ JSON files under `LibraryRoot/<backend_kind>/*.json` are loaded at boot by `Sens
 
 ## Cross-platform conditional compilation
 
-`Smited.Daemon.Owo.csproj` targets `net9.0-windows`. Its OWO NuGet package and `OwoBackend.cs` source are guarded by `'$(OS)' == 'Windows_NT'` conditions so the project compiles to an empty assembly on Mac/Linux. The daemon project's reverse `ProjectReference` to it is Windows-only and uses `ReferenceOutputAssembly=false` so the compile-time graph stays acyclic — `BackendBootstrapper` loads `OwoBackend` via `Type.GetType("Smited.Daemon.Owo.OwoBackend, Smited.Daemon.Owo")` at runtime when the daemon is on Windows AND `Smited:Backends:EnableOwo` is true.
+`Smited.Daemon.Owo.csproj` targets `net9.0-windows`. Its OWO NuGet package and the SDK-touching files (`OwoBackend.cs`, `StaticOwoSdk.cs`, `OwoMuscleMap.cs`) are guarded by the `_TargetingWindows` MSBuild property (defined in `Directory.Build.props`), which is true when either the host is Windows or the build was given a `win-*` `RuntimeIdentifier` — that's the correct gate for "include the Windows-only assets," and matches the Cake `Publish-Win-x64` task that runs on CI from Linux. Gating on `'$(OS)' == 'Windows_NT'` (the build host) is wrong because it silently drops the OWO assembly from cross-publishes. The daemon project's reverse `ProjectReference` is gated the same way and uses `ReferenceOutputAssembly=false` so the compile-time graph stays acyclic — `BackendBootstrapper` loads `OwoBackend` via `Type.GetType("Smited.Daemon.Owo.OwoBackend, Smited.Daemon.Owo")` at runtime when `Smited:Backends:EnableOwo` is true and the assembly is in the output directory. The matching `IOwoSdk` registration in `Program.cs` follows the same reflective pattern for `StaticOwoSdk`. See [`docs/adding-a-backend.md`](docs/adding-a-backend.md) for the full pattern any new platform-specific backend should follow.
+
+The `IOwoSdk` interface and the `OwoSendCommand` record live in `Smited.Daemon.Abstractions` so both the daemon host and the Windows-only OWO project can reference them without anyone forcing a Mac-side compile dependency on the Windows assembly. Tests that need to construct `OwoBackend` directly (Trigger/Stop/heartbeat behavior) take a `_TargetingWindows`-gated `ProjectReference` to `Smited.Daemon.Owo` from the test csproj and are excluded from compile when not targeting Windows.
 
 ## Things explicitly out of scope
 
-- Real OWO SDK calls (the Windows project is a stubbed placeholder).
 - TLS, authentication.
 - A multiplexer, Stream Deck integration, OBS integration. Those are downstream consumers of this daemon.
 - New RPCs, message types, or fields beyond `v0.1.0`. Schema changes start in `Quantumlyy/smited-schema`.

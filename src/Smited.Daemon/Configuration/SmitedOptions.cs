@@ -1,3 +1,5 @@
+using Smited.Daemon.Backends;
+
 namespace Smited.Daemon.Configuration;
 
 /// <summary>
@@ -38,6 +40,12 @@ public sealed class SmitedOptions
     {
         public bool EnableMockOwo { get; set; } = true;
         public bool EnableOwo { get; set; }
+
+        /// <summary>
+        /// Configuration for the real OWO Skin backend, used when
+        /// <see cref="EnableOwo"/> is <c>true</c> on a Windows host.
+        /// </summary>
+        public OwoBackendOptions Owo { get; set; } = new();
     }
 
     public sealed class SensationsOptions
