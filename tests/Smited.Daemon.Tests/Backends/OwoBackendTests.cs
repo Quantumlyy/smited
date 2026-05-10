@@ -420,6 +420,63 @@ public class OwoBackendTests
         sdk.DidNotReceive().Stop();
     }
 
+    [Fact]
+    public void StopAuthoritatively_advances_sequence_so_prior_captures_are_stale()
+    {
+        // Load-bearing claim of StopAuthoritatively: after it returns,
+        // every captured sequence from before is stale and
+        // StopIfStillLatest will short-circuit. Without this, a
+        // future change that removed the ++_lastSendSequence line
+        // could regress silently — and that's exactly what motivated
+        // the helper (StopAsync's plain _sdk.Stop() didn't bump the
+        // sequence, so the playback catch double-stopped the device).
+        var backend = NewBackend(out _, out var sdk);
+        var seq = backend.SendAndStamp(MakeCommand("a"));
+
+        backend.StopAuthoritatively();
+
+        backend.StopIfStillLatest(seq).Should().BeFalse(
+            "captured sequence should be stale after authoritative stop");
+        sdk.Received(1).Stop(); // exactly the StopAuthoritatively call
+    }
+
+    [Fact]
+    public async Task StopAsync_with_an_in_flight_playback_calls_sdk_Stop_exactly_once()
+    {
+        // Regression: without StopAuthoritatively bumping the
+        // sequence, StopAsync's _sdk.Stop() would be followed by the
+        // playback's OCE catch firing StopIfStillLatest — which
+        // observed its sequence as latest (Stop doesn't increment) and
+        // fired a second _sdk.Stop(). The test asserts the
+        // "exactly one Stop per StopAsync" contract.
+        var backend = await NewReadyBackend();
+        await using var ____ = backend.B;
+
+        await backend.B.TriggerAsync(MakeRequest("a", TimeSpan.FromSeconds(5)), CancellationToken.None);
+        await Task.Delay(50); // let the first Send fire
+
+        await backend.B.StopAsync(new BackendStopRequest(SensationId: null, All: true), CancellationToken.None);
+        await Task.Delay(150); // let the playback's OCE catch run
+
+        backend.Sdk.Received(1).Send(Arg.Any<OwoSendCommand>());
+        backend.Sdk.Received(1).Stop();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_with_an_in_flight_playback_calls_sdk_Stop_exactly_once()
+    {
+        var backend = await NewReadyBackend();
+
+        await backend.B.TriggerAsync(MakeRequest("a", TimeSpan.FromSeconds(5)), CancellationToken.None);
+        await Task.Delay(50);
+
+        await backend.B.DisposeAsync();
+        await Task.Delay(150);
+
+        backend.Sdk.Received(1).Send(Arg.Any<OwoSendCommand>());
+        backend.Sdk.Received(1).Stop();
+    }
+
     private static OwoSendCommand MakeCommand(string zoneId) => new(
         FrequencyHz: 50,
         DurationSeconds: 0.1f,

@@ -532,7 +532,14 @@ public sealed class OwoBackend : IHapticBackend
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Snapshot the playbacks we're going to cancel BEFORE issuing
+        // StopAuthoritatively — that way the sequence bump lands while
+        // every targeted playback is still in flight, so when their
+        // OCE catch eventually fires StopIfStillLatest will see a
+        // stale sequence and stand down. Cancelling the CTSes first
+        // would race the catch against the bump.
         var stopped = 0;
+        var toCancel = new List<ActivePlayback>();
 
         if (request.All)
         {
@@ -540,7 +547,7 @@ public sealed class OwoBackend : IHapticBackend
             {
                 if (_activeSensations.TryRemove(id, out var removed))
                 {
-                    SafeCancel(removed.Cts);
+                    toCancel.Add(removed);
                     stopped++;
                 }
             }
@@ -548,32 +555,22 @@ public sealed class OwoBackend : IHapticBackend
         else if (!string.IsNullOrEmpty(request.SensationId)
             && _activeSensations.TryRemove(request.SensationId, out var playback))
         {
-            SafeCancel(playback.Cts);
+            toCancel.Add(playback);
             stopped = 1;
         }
 
-        // Always tell the SDK to silence the device. OWO's Stop() is a
-        // global cancel of whatever's playing right now; given the
-        // exclusive concurrency model this is the correct semantic for
-        // both per-id and All stops. The playback task's OCE catch will
-        // also run (eventually) and call StopIfStillLatest, which is a
-        // no-op now because StopAsync's _sdk.Stop() doesn't touch
-        // _lastSendSequence — the catch's compare-and-stop sees its
-        // sequence as latest and would fire a redundant Stop on an
-        // already-silenced device. Harmless: there's no replacement
-        // Send to silence on the StopAsync path (the coordinator
-        // doesn't call StopAsync during preempt).
         if (stopped > 0)
         {
-            try
+            // StopAuthoritatively silences the device AND bumps
+            // _lastSendSequence under _sdkSync. Doing this BEFORE
+            // cancelling each CTS guarantees that when each playback's
+            // OCE catch runs, its captured sequence is already stale —
+            // the catch's StopIfStillLatest returns false and the
+            // "exactly one Stop per StopAsync" contract holds.
+            StopAuthoritatively();
+            foreach (var playback in toCancel)
             {
-                _sdk.Stop();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex,
-                    "OWO SDK Stop() threw while cancelling sensations; "
-                    + "the in-process tracking has already been cleared");
+                SafeCancel(playback.Cts);
             }
         }
 
@@ -609,20 +606,25 @@ public sealed class OwoBackend : IHapticBackend
         }
 
         // Snapshot active playbacks BEFORE cancelling so we can await
-        // each one's completion signal. Each playback's TCS is resolved
-        // only after its SensationCancelled event is written to
-        // _events — awaiting here ensures those events make the channel
-        // before TryComplete shuts the writer below.
-        // The playback's StopIfStillLatest in its OCE catch will fire a
-        // redundant _sdk.Stop() if its sequence is still latest. That's
-        // harmless: there's no replacement Send during DisposeAsync
-        // (this path is only entered on backend shutdown), so silencing
-        // an already-stopping device is a no-op.
+        // each one's completion signal — each playback's TCS is
+        // resolved only after its SensationCancelled event is written
+        // to _events, and awaiting here ensures those events make the
+        // channel before TryComplete shuts the writer below.
         var snapshot = _activeSensations.Values.ToArray();
+
+        // Authoritatively stop the device AND bump the send sequence so
+        // any playback's OCE catch sees a stale captured sequence and
+        // StopIfStillLatest returns false. Issuing this even when there
+        // are no in-flight playbacks gives a disposed backend a
+        // guaranteed-silent device on the way out, and keeps every
+        // _sdk.Stop() call in this file routed through the three named
+        // helpers (SendAndStamp / StopIfStillLatest / StopAuthoritatively).
+        StopAuthoritatively();
         foreach (var playback in snapshot)
         {
             SafeCancel(playback.Cts);
         }
+
         foreach (var playback in snapshot)
         {
             try
@@ -647,16 +649,6 @@ public sealed class OwoBackend : IHapticBackend
             }
         }
         _activeSensations.Clear();
-
-        try
-        {
-            _sdk.Stop();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex,
-                "OWO backend {Id} threw on Stop() during dispose; continuing", Id);
-        }
 
         try
         {
@@ -948,6 +940,43 @@ public sealed class OwoBackend : IHapticBackend
                     "OWO SDK Stop threw during sequence-protected catch");
                 return false;
             }
+        }
+    }
+
+    /// <summary>
+    /// Issues an authoritative <see cref="IOwoSdk.Stop"/> on the device
+    /// AND bumps <see cref="_lastSendSequence"/> so any concurrently-
+    /// cancelling playback's <see cref="StopIfStillLatest"/> check
+    /// returns false. Use this from any external path
+    /// (<see cref="StopAsync"/>, <see cref="DisposeAsync"/>) that is
+    /// itself responsible for silencing the device — without the
+    /// sequence bump, every playback's OCE catch would fire its own
+    /// Stop, breaking the "exactly one Stop per StopAsync" contract.
+    /// </summary>
+    /// <remarks>
+    /// All three helpers (<see cref="SendAndStamp"/>,
+    /// <see cref="StopIfStillLatest"/>, this one) operate under the
+    /// same <see cref="_sdkSync"/> lock so the orderings are coherent:
+    /// after this returns, every captured sequence from before the
+    /// bump is now stale and StopIfStillLatest will short-circuit.
+    /// </remarks>
+    internal void StopAuthoritatively()
+    {
+        lock (_sdkSync)
+        {
+            try
+            {
+                _sdk.Stop();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "OWO SDK Stop threw during authoritative stop");
+            }
+            var newSeq = ++_lastSendSequence;
+            _logger.LogDebug(
+                "OWO authoritative Stop issued: backend_id={BackendId} sequence advanced to {Seq}",
+                Id, newSeq);
         }
     }
 
