@@ -41,6 +41,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+    <Compile Remove="Backends\OwoBackendLifecycleTests.cs" />
     <Compile Remove="Backends\OwoBackendTests.cs" />
     <Compile Remove="Backends\OwoMuscleMapTests.cs" />
   </ItemGroup>

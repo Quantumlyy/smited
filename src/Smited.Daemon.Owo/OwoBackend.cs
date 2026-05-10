@@ -55,6 +55,9 @@ public sealed class OwoBackend : IHapticBackend
         });
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSensations =
         new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _lifetimeCts;
+    private Task? _heartbeatTask;
+    private bool _lastSeenConnected;
 
     /// <summary>
     /// Constructed by the daemon's <c>BackendBootstrapper</c> via
@@ -171,6 +174,7 @@ public sealed class OwoBackend : IHapticBackend
         }
 
         Status = BackendStatus.Ready;
+        _lastSeenConnected = true;
         // The MyOWO app refuses to pair with an uncalibrated device, so the
         // moment AutoConnect/Connect succeeds we know calibration is present.
         // The SDK does not expose the calibration timestamp from MyOWO, so we
@@ -183,7 +187,127 @@ public sealed class OwoBackend : IHapticBackend
 
         _logger.LogInformation(
             "OWO backend {Id} connected, calibrated and ready", Id);
+
+        StartHeartbeat();
     }
+
+    private void StartHeartbeat()
+    {
+        // Idempotent: a reconnect path may rerun ConnectAsync on a still-
+        // running backend. Reuse the existing loop in that case.
+        if (_heartbeatTask is { IsCompleted: false })
+        {
+            return;
+        }
+
+        _lifetimeCts = new CancellationTokenSource();
+        _heartbeatTask = Task.Run(() => HeartbeatLoopAsync(_lifetimeCts.Token));
+    }
+
+    private async Task HeartbeatLoopAsync(CancellationToken ct)
+    {
+        var period = TimeSpan.FromSeconds(Math.Max(1, _options.HeartbeatSeconds));
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(period, _time, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            bool connected;
+            try
+            {
+                connected = _sdk.IsConnected;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "OWO backend {Id} heartbeat failed reading IsConnected", Id);
+                continue;
+            }
+
+            if (connected == _lastSeenConnected)
+            {
+                continue;
+            }
+
+            _lastSeenConnected = connected;
+            if (connected)
+            {
+                Status = BackendStatus.Ready;
+                EmitLifecycleStatusChanged("reconnected");
+                _logger.LogInformation("OWO backend {Id} transport restored", Id);
+            }
+            else
+            {
+                Status = BackendStatus.Disconnected;
+                EmitLifecycleStatusChanged("transport dropped");
+                _logger.LogWarning(
+                    "OWO backend {Id} transport dropped; sensations will fail until reconnected",
+                    Id);
+                _ = TryReconnectAsync(ct);
+            }
+        }
+    }
+
+    private async Task TryReconnectAsync(CancellationToken ct)
+    {
+        for (var attempt = 1; attempt <= _options.MaxReconnectAttempts; attempt++)
+        {
+            try
+            {
+                var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                await Task.Delay(backoff, _time, ct).ConfigureAwait(false);
+
+                if (!string.IsNullOrEmpty(_options.ManualIp))
+                {
+                    await _sdk.ConnectAsync(_options.ManualIp).WaitAsync(ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _sdk.AutoConnectAsync().WaitAsync(ct).ConfigureAwait(false);
+                }
+
+                if (_sdk.IsConnected)
+                {
+                    _logger.LogInformation(
+                        "OWO backend {Id} reconnected on attempt {Attempt}",
+                        Id, attempt);
+                    // The heartbeat tick observes the state flip and emits
+                    // BackendLifecycleEvent itself; nothing to do here.
+                    return;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "OWO backend {Id} reconnect attempt {Attempt} failed",
+                    Id, attempt);
+            }
+        }
+
+        Status = BackendStatus.Error;
+        EmitLifecycleStatusChanged("reconnection exhausted");
+        _logger.LogError(
+            "OWO backend {Id} unable to reconnect after {Max} attempts; restart the daemon to retry",
+            Id, _options.MaxReconnectAttempts);
+    }
+
+    private void EmitLifecycleStatusChanged(string reason) =>
+        EmitEvent(new BackendLifecycleEvent(
+            Id,
+            _time.GetUtcNow(),
+            BackendLifecycleChange.StatusChanged,
+            BackendSummarySnapshot.Of(this),
+            reason));
 
     /// <inheritdoc />
     public Task<BackendTriggerResult> TriggerAsync(
@@ -345,10 +469,62 @@ public sealed class OwoBackend : IHapticBackend
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() =>
-        throw new NotSupportedException(
-            "DisposeAsync is wired in commit O4 alongside the heartbeat "
-            + "poller and event channel completion.");
+    public async ValueTask DisposeAsync()
+    {
+        // Stop the heartbeat loop before tearing down the SDK so the loop
+        // doesn't observe a transient IsConnected=false during shutdown
+        // and emit a spurious "transport dropped" event.
+        if (_lifetimeCts is { } cts)
+        {
+            try
+            {
+                await cts.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException) { }
+        }
+
+        if (_heartbeatTask is { } heartbeat)
+        {
+            try
+            {
+                await heartbeat.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "OWO backend {Id} heartbeat threw on shutdown", Id);
+            }
+        }
+
+        foreach (var (_, sensationCts) in _activeSensations)
+        {
+            SafeCancel(sensationCts);
+        }
+        _activeSensations.Clear();
+
+        try
+        {
+            _sdk.Stop();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "OWO backend {Id} threw on Stop() during dispose; continuing", Id);
+        }
+
+        try
+        {
+            _sdk.Disconnect();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "OWO backend {Id} threw on Disconnect() during dispose; continuing", Id);
+        }
+
+        _events.Writer.TryComplete();
+        _lifetimeCts?.Dispose();
+    }
 
     private static ZoneTopology BuildZones()
     {
