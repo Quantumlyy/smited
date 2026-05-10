@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Smited.Daemon.Backends;
 using Smited.Daemon.BodyMap;
@@ -472,6 +473,124 @@ public class BodyMapValidatorTests
 
         result.Errors.Should().BeEmpty();
         result.RegionsByBackend.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Same_zone_in_two_placements_with_different_regions_is_DuplicateZonePlacement()
+    {
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            // Both placements would otherwise be valid; the duplicate
+            // (pectoral_l in two different regions) is what we're
+            // catching. AllowOverrideRegions suppresses the
+            // ChestOverHeart smited-default error so it doesn't drown
+            // out the duplicate error in the assertion.
+            AllowOverrideRegions = { BodyRegion.ChestOverHeart },
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        var dup = result.Errors.Should().ContainSingle(
+            e => e.Kind == BodyMapErrorKind.DuplicateZonePlacement).Subject;
+        dup.ZoneId.Should().Be("pectoral_l");
+        dup.Message.Should().Contain("ChestFront");
+        dup.Message.Should().Contain("LeftUpperArm");
+    }
+
+    [Fact]
+    public void Group_and_leaf_zone_overlap_is_caught_post_expansion()
+    {
+        // The "torso" group on MockOwoBackend's zone topology contains
+        // pectoral_l (among others). Placement A declares the group in
+        // LeftUpperArm; placement B declares the leaf in BackUpper.
+        // Post-expansion, pectoral_l appears in both regions →
+        // DuplicateZonePlacement. The neither-region-is-forbidden
+        // setup keeps the test focused on duplicate detection rather
+        // than incidentally tripping a forbidden-region error too.
+        var topology = new ZoneTopology();
+        topology.Zones.Add(new Zone { Id = "pectoral_l", DisplayName = "L" });
+        topology.Zones.Add(new Zone { Id = "pectoral_r", DisplayName = "R" });
+        var torso = new ZoneGroup { Id = "torso", DisplayName = "Torso" };
+        torso.ZoneIds.AddRange(new[] { "pectoral_l", "pectoral_r" });
+        topology.Groups.Add(torso);
+        var backend = new FakeBackend("vest") { Zones = topology };
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "torso" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.BackUpper,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().Contain(
+            e => e.Kind == BodyMapErrorKind.DuplicateZonePlacement
+              && e.ZoneId == "pectoral_l");
+    }
+
+    [Fact]
+    public void Same_zone_same_region_declared_twice_is_still_DuplicateZonePlacement()
+    {
+        // Redundant placement: two entries covering the same (backend,
+        // zone, region). The duplicate detection still fires; the
+        // error message lists the region only once thanks to the
+        // .Distinct() in the validator's regions-collected formatter.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        var dup = result.Errors.Should().ContainSingle(
+            e => e.Kind == BodyMapErrorKind.DuplicateZonePlacement).Subject;
+        Regex.Matches(dup.Message, "LeftUpperArm").Count.Should().Be(1);
     }
 
     private static FakeBackend MakeFake(

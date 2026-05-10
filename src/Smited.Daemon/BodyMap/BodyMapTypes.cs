@@ -87,6 +87,21 @@ internal enum BodyMapErrorKind
     /// nor a group on the named backend. User-fixable typo; fatal.
     /// </summary>
     UnknownZone,
+
+    /// <summary>
+    /// The same (backend, leaf zone) pair appears in more than one
+    /// placement. A zone occupies one region; multi-region zones are
+    /// not modelled today. Fatal — the user must consolidate or split
+    /// the placements.
+    /// </summary>
+    /// <remarks>
+    /// Duplication can arise implicitly via group expansion: a
+    /// placement declaring a zone group (e.g. <c>arms</c>) expands
+    /// to every member zone, so a group + leaf-zone combination
+    /// touching the same leaf is also a duplicate. The validator
+    /// catches both shapes after group expansion.
+    /// </remarks>
+    DuplicateZonePlacement,
 }
 
 /// <summary>

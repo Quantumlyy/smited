@@ -92,14 +92,17 @@ internal sealed class BodyMapValidator
             .Except(options.AllowOverrideRegions)
             .ToImmutableHashSet();
 
+        // Pass 1: validate backend ids and expand each placement into
+        // its (backend, leafZone, region, source) tuples. UnknownBackend,
+        // BackendDeclined, and UnknownZone errors land here. Placements
+        // with an Unspecified region are silently skipped.
+        var expanded = new List<ExpandedPlacement>();
         foreach (var placement in options.Placements)
         {
             if (!backendById.TryGetValue(placement.BackendId, out var backend))
             {
                 if (declaredBackendIds.Contains(placement.BackendId))
                 {
-                    // Backend was declared but its factory declined to
-                    // register it. Environmental, not a config error.
                     errors.Add(new BodyMapError(
                         placement.BackendId,
                         ZoneId: "",
@@ -128,8 +131,6 @@ internal sealed class BodyMapValidator
 
             if (placement.Region == BodyRegion.Unspecified)
             {
-                // Allowed but useless: the placement contributes nothing
-                // to forbidden-region or overlap checks. No error.
                 continue;
             }
 
@@ -141,20 +142,18 @@ internal sealed class BodyMapValidator
                 g => (IReadOnlyList<string>)g.ZoneIds.ToArray(),
                 StringComparer.OrdinalIgnoreCase);
 
-            // Resolve every zone (leaf or group) into its leaf set;
-            // unknown ids surface as UnknownZone errors. Don't dedup
-            // across placements — each placement's zones contribute
-            // independently to the regionsByBackend index.
-            var resolvedLeafZones = new List<string>();
             foreach (var zoneId in placement.ZoneIds)
             {
                 if (groupMembers.TryGetValue(zoneId, out var members))
                 {
-                    resolvedLeafZones.AddRange(members);
+                    foreach (var member in members)
+                    {
+                        expanded.Add(new ExpandedPlacement(backend.Id, member, placement.Region));
+                    }
                 }
                 else if (knownLeafZones.Contains(zoneId))
                 {
-                    resolvedLeafZones.Add(zoneId);
+                    expanded.Add(new ExpandedPlacement(backend.Id, zoneId, placement.Region));
                 }
                 else
                 {
@@ -166,42 +165,77 @@ internal sealed class BodyMapValidator
                         $"Zone '{zoneId}' is neither a leaf zone nor a group on backend '{backend.Id}'."));
                 }
             }
+        }
 
-            // For each leaf zone, run the forbidden-region checks. Walk
-            // the FORBIDDEN regions and ask whether the placement's
-            // region overlaps each — symmetric so a placement on a
-            // parent (ChestFront) trips a forbidden child (ChestOverHeart)
-            // and vice-versa. Manufacturer first (non-overridable),
-            // smited-default second.
-            foreach (var zone in resolvedLeafZones)
+        // Pass 2: detect duplicates. A (BackendId, ZoneId) pair appearing
+        // in more than one expanded entry means the user declared the
+        // same leaf zone in multiple regions — either directly, or
+        // implicitly via group + leaf-zone overlap. GroupBy expresses
+        // "any pair appearing more than once" declaratively; the
+        // previous accumulator-based first-write-wins approach hid this
+        // intent in control flow and silently dropped the second region.
+        var duplicateGroups = expanded
+            .GroupBy(x => (x.BackendId, x.ZoneId))
+            .Where(g => g.Count() > 1)
+            .ToArray();
+
+        foreach (var group in duplicateGroups)
+        {
+            var regions = group.Select(x => x.Region).Distinct().ToArray();
+            errors.Add(new BodyMapError(
+                BackendId: group.Key.BackendId,
+                ZoneId: group.Key.ZoneId,
+                Region: regions[0],
+                Kind: BodyMapErrorKind.DuplicateZonePlacement,
+                Message: $"Zone '{group.Key.ZoneId}' on backend '{group.Key.BackendId}' "
+                    + $"declared in multiple regions: {string.Join(", ", regions)}. "
+                    + "A zone may only occupy one region. Consolidate the placements "
+                    + "(note: a placement using a zone group expands to every member "
+                    + "zone, so a group + leaf-zone combination can implicitly "
+                    + "duplicate a leaf)."));
+        }
+
+        var duplicateKeys = duplicateGroups
+            .Select(g => g.Key)
+            .ToHashSet();
+
+        // Pass 3: for non-duplicate entries, run forbidden-region checks
+        // and build the regionsByBackend / zoneRegions indices. Walk
+        // the FORBIDDEN regions per leaf and ask whether the placement
+        // region overlaps each — RegionHierarchy.Overlaps is symmetric
+        // so a placement on a parent (ChestFront) trips a forbidden
+        // child (ChestOverHeart) and vice-versa.
+        foreach (var entry in expanded.Where(x => !duplicateKeys.Contains((x.BackendId, x.ZoneId))))
+        {
+            var backend = backendById[entry.BackendId];
+
+            BodyRegion? citedManufacturer = null;
+            foreach (var forbidden in backend.ForbiddenRegions)
             {
-                BodyRegion? citedManufacturer = null;
-                foreach (var forbidden in backend.ForbiddenRegions)
+                if (RegionHierarchy.Overlaps(entry.Region, forbidden))
                 {
-                    if (RegionHierarchy.Overlaps(placement.Region, forbidden))
-                    {
-                        citedManufacturer = forbidden;
-                        break;
-                    }
+                    citedManufacturer = forbidden;
+                    break;
                 }
+            }
 
-                if (citedManufacturer is BodyRegion mfBan)
-                {
-                    errors.Add(new BodyMapError(
-                        backend.Id,
-                        zone,
-                        mfBan,
-                        BodyMapErrorKind.ManufacturerForbidden,
-                        $"Placement of zone '{zone}' on backend '{backend.Id}' "
-                        + $"in region '{placement.Region}' overlaps the backend's "
-                        + $"manufacturer forbidden region '{mfBan}'."));
-                    continue;
-                }
-
+            if (citedManufacturer is BodyRegion mfBan)
+            {
+                errors.Add(new BodyMapError(
+                    entry.BackendId,
+                    entry.ZoneId,
+                    mfBan,
+                    BodyMapErrorKind.ManufacturerForbidden,
+                    $"Placement of zone '{entry.ZoneId}' on backend '{entry.BackendId}' "
+                    + $"in region '{entry.Region}' overlaps the backend's "
+                    + $"manufacturer forbidden region '{mfBan}'."));
+            }
+            else
+            {
                 BodyRegion? citedDefault = null;
                 foreach (var forbidden in smitedDefaults)
                 {
-                    if (RegionHierarchy.Overlaps(placement.Region, forbidden))
+                    if (RegionHierarchy.Overlaps(entry.Region, forbidden))
                     {
                         citedDefault = forbidden;
                         break;
@@ -211,37 +245,37 @@ internal sealed class BodyMapValidator
                 if (citedDefault is BodyRegion defaultBan)
                 {
                     errors.Add(new BodyMapError(
-                        backend.Id,
-                        zone,
+                        entry.BackendId,
+                        entry.ZoneId,
                         defaultBan,
                         BodyMapErrorKind.SmitedDefaultForbidden,
-                        $"Placement of zone '{zone}' on backend '{backend.Id}' "
-                        + $"in region '{placement.Region}' overlaps smited's default "
+                        $"Placement of zone '{entry.ZoneId}' on backend '{entry.BackendId}' "
+                        + $"in region '{entry.Region}' overlaps smited's default "
                         + $"forbidden region '{defaultBan}'. Add '{defaultBan}' to "
                         + "Smited:BodyMap:AllowOverrideRegions to opt out."));
                 }
             }
 
-            // Even if errors fire, contribute to the regions index so
-            // overlap analysis sees the intended coverage. Forbidden
-            // backends will get deregistered before the index is
-            // consulted by the trigger-time check.
-            if (!regionsByBackend.TryGetValue(backend.Id, out var set))
+            // Even when forbidden-region errors fire for this entry,
+            // contribute to the regions / zones indices so overlap
+            // analysis sees the intended coverage. The bootstrapper
+            // throws on forbidden errors so the indices are only
+            // consulted when there are no fatal errors — but the
+            // populated state is also useful in tests that assert
+            // on the result's index shape.
+            if (!regionsByBackend.TryGetValue(entry.BackendId, out var set))
             {
                 set = new HashSet<BodyRegion>();
-                regionsByBackend[backend.Id] = set;
+                regionsByBackend[entry.BackendId] = set;
             }
-            set.Add(placement.Region);
+            set.Add(entry.Region);
 
-            if (!zoneRegions.TryGetValue(backend.Id, out var zoneMap))
+            if (!zoneRegions.TryGetValue(entry.BackendId, out var zoneMap))
             {
                 zoneMap = new Dictionary<string, BodyRegion>(StringComparer.OrdinalIgnoreCase);
-                zoneRegions[backend.Id] = zoneMap;
+                zoneRegions[entry.BackendId] = zoneMap;
             }
-            foreach (var leaf in resolvedLeafZones)
-            {
-                zoneMap.TryAdd(leaf, placement.Region);
-            }
+            zoneMap[entry.ZoneId] = entry.Region;
         }
 
         // Build the inverse index: region → set of backend ids that
@@ -354,4 +388,16 @@ internal sealed class BodyMapValidator
             .SelectMany(p => p.ZoneIds)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    /// <summary>
+    /// One backend / leaf-zone / region tuple after the per-placement
+    /// expansion pass. Group references in <c>Placement.ZoneIds</c>
+    /// produce one entry per member leaf zone here, so duplicate-detection
+    /// catches both direct duplicates and implicit duplicates via group
+    /// + leaf-zone overlap.
+    /// </summary>
+    private sealed record ExpandedPlacement(
+        string BackendId,
+        string ZoneId,
+        BodyRegion Region);
 }
