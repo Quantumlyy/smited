@@ -22,5 +22,9 @@
     </div>
 
     <script src="_framework/blazor.server.js"></script>
+    <script type="module">
+        import { registerKeyboardShortcuts } from './admin.js';
+        window.smitedAdmin = { registerKeyboardShortcuts };
+    </script>
 </body>
 </html>
