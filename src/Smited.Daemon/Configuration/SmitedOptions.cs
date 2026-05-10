@@ -69,6 +69,12 @@ public sealed class SmitedOptions
         /// skipped without aborting daemon startup.
         /// </summary>
         public bool EnableBhaptics { get; set; }
+
+        /// <summary>
+        /// Configuration for the real OWO Skin backend, used when
+        /// <see cref="EnableOwo"/> is <c>true</c> on a Windows host.
+        /// </summary>
+        public OwoBackendOptions Owo { get; set; } = new();
     }
 
     public sealed class SensationsOptions
