@@ -59,6 +59,21 @@ public sealed class OwoBackendOptions
     public int HeartbeatSeconds { get; set; } = 5;
 
     /// <summary>
+    /// Maximum time the daemon waits for the OWO SDK's connect handshake
+    /// to complete before declaring the backend
+    /// <c>BackendStatus.Disconnected</c> and continuing daemon startup.
+    /// The heartbeat loop continues attempting reconnect in the background;
+    /// the backend may transition to <c>BackendStatus.Ready</c> later
+    /// without a daemon restart. Default 10 seconds.
+    /// </summary>
+    /// <remarks>
+    /// Set to 0 to disable the deadline (block startup until the SDK
+    /// responds — the pre-fix behavior). Useful for headless test fixtures
+    /// with a known-responsive mock SDK.
+    /// </remarks>
+    public int ConnectTimeoutSeconds { get; set; } = 10;
+
+    /// <summary>
     /// True when <see cref="ManualIp"/> is unset (use auto-connect) or
     /// is a parseable IPv4/IPv6 address.
     /// </summary>

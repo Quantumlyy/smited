@@ -225,22 +225,53 @@ public sealed class OwoBackend : IHapticBackend
 
         _sdk.Configure(_options.GameDisplayName);
 
+        var deadline = _options.ConnectTimeoutSeconds > 0
+            ? TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds)
+            : Timeout.InfiniteTimeSpan;
+
         try
         {
+            Task connectTask;
             if (!string.IsNullOrEmpty(_options.ManualIp))
             {
                 _logger.LogInformation(
                     "OWO backend {Id} connecting to MyOWO at {Ip}",
                     Id, _options.ManualIp);
-                await _sdk.ConnectAsync(_options.ManualIp).WaitAsync(ct).ConfigureAwait(false);
+                connectTask = _sdk.ConnectAsync(_options.ManualIp);
             }
             else
             {
                 _logger.LogInformation(
                     "OWO backend {Id} auto-connecting to MyOWO; pick this entry in the MyOWO 'Scan Games' panel if pairing stalls",
                     Id);
-                await _sdk.AutoConnectAsync().WaitAsync(ct).ConfigureAwait(false);
+                connectTask = _sdk.AutoConnectAsync();
             }
+
+            if (deadline == Timeout.InfiniteTimeSpan)
+            {
+                await connectTask.WaitAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await connectTask.WaitAsync(deadline, ct).ConfigureAwait(false);
+            }
+        }
+        catch (TimeoutException)
+        {
+            // The SDK's connect handshake didn't complete within the
+            // deadline. Daemon startup must continue so other backends,
+            // the gRPC listener, and the admin UI come up. The heartbeat
+            // loop (started below) keeps polling IsConnected; if MyOWO /
+            // the OWO Visualizer accepts the game later, status flips to
+            // Ready automatically without a daemon restart.
+            Status = BackendStatus.Disconnected;
+            _logger.LogWarning(
+                "OWO backend {Id} did not connect within {Seconds}s; daemon will continue and the heartbeat loop will keep retrying. "
+              + "Common causes: OWO Visualizer or MyOWO not running, the app did not accept the game in 'Scan Games', "
+              + "network/firewall blocking the broadcast, or a wrong project ID / .owoauth file.",
+                Id, _options.ConnectTimeoutSeconds);
+            StartHeartbeat();
+            return;
         }
         catch (OperationCanceledException)
         {
