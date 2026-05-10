@@ -58,15 +58,42 @@ builder.Services.AddSingleton(sp =>
 // imports the OWOGame namespace, which is only present in the Windows-only
 // OWO NuGet package. The implementation is loaded reflectively so this
 // project doesn't need a compile-time reference to Smited.Daemon.Owo on
-// Mac/Linux. When the assembly isn't on disk, registration is skipped — the
-// later reflective lookup of OwoBackend in BackendBootstrapper handles the
-// "EnableOwo set but assembly missing" path with a logged warning.
+// Mac/Linux. The Type.GetType call is wrapped because — even with
+// throwOnError=false (the default) — file-load failures surface here:
+// if Smited.Daemon.Owo.dll is present but its OWO.dll runtime dependency
+// is missing or unloadable, the lookup throws FileNotFoundException /
+// FileLoadException / TypeLoadException. Crashing daemon startup on that
+// path defeats the point of the reflective load; we log via Serilog (the
+// host logger isn't constructed yet but Serilog's static API is wired
+// from configuration earlier) and skip registration. BackendBootstrapper's
+// own reflective lookup of OwoBackend will then log the user-facing
+// "EnableOwo set but assembly missing" warning when it hits the same
+// resolution.
 if (OperatingSystem.IsWindows())
 {
     var enableOwo = builder.Configuration.GetValue<bool>("Smited:Backends:EnableOwo");
     if (enableOwo)
     {
-        var staticSdkType = Type.GetType("Smited.Daemon.Owo.StaticOwoSdk, Smited.Daemon.Owo");
+        Type? staticSdkType = null;
+        try
+        {
+            staticSdkType = Type.GetType("Smited.Daemon.Owo.StaticOwoSdk, Smited.Daemon.Owo");
+        }
+        catch (Exception ex)
+        {
+            // Serilog's host pipeline isn't online yet (UseSerilog is
+            // configured but the host hasn't started), so the static
+            // Log.Logger would no-op here. Console.Error is the
+            // pre-host-start signal channel; BackendBootstrapper will
+            // also log a structured warning later when its own
+            // reflective lookup runs.
+            Console.Error.WriteLine(
+                "warn: Skipping IOwoSdk registration; reflective load of "
+                + "Smited.Daemon.Owo.StaticOwoSdk threw. The daemon will "
+                + "still run; OWO triggers will be rejected as if the "
+                + $"assembly were absent. Underlying error: {ex.GetType().Name}: {ex.Message}");
+        }
+
         if (staticSdkType is not null)
         {
             builder.Services.AddSingleton(typeof(IOwoSdk), staticSdkType);

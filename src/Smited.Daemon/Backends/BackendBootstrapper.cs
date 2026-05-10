@@ -67,13 +67,38 @@ internal sealed class BackendBootstrapper : IHostedService
             }
             else
             {
-                var owoType = Type.GetType("Smited.Daemon.Owo.OwoBackend, Smited.Daemon.Owo");
-                if (owoType is null)
+                // Type.GetType can throw FileNotFoundException /
+                // FileLoadException / TypeLoadException even with the
+                // default throwOnError=false when the assembly is
+                // present but a transitive dependency (OWO.dll) is
+                // missing or unloadable. Treat that the same as the
+                // assembly-not-found case so daemon startup doesn't
+                // crash; the user-facing remediation is the same
+                // either way (rebuild/republish to land the OWO
+                // runtime files).
+                Type? owoType;
+                try
                 {
-                    _logger.LogWarning(
-                        "OWO backend disabled: EnableOwo=true but the Smited.Daemon.Owo assembly is not in the output directory.");
+                    owoType = Type.GetType("Smited.Daemon.Owo.OwoBackend, Smited.Daemon.Owo");
+                    if (owoType is null)
+                    {
+                        _logger.LogWarning(
+                            "OWO backend disabled: EnableOwo=true but the Smited.Daemon.Owo assembly is not in the output directory.");
+                    }
                 }
-                else
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "OWO backend disabled: reflective load of OwoBackend threw "
+                        + "({ExceptionType}). Likely cause: the Smited.Daemon.Owo "
+                        + "assembly is present but its OWO.dll runtime dependency "
+                        + "isn't next to it. Rebuild/republish to refresh the OWO "
+                        + "runtime files.",
+                        ex.GetType().Name);
+                    owoType = null;
+                }
+
+                if (owoType is not null)
                 {
                     var owo = (IHapticBackend)ActivatorUtilities.CreateInstance(_services, owoType);
                     if (await RegisterAndFan(owo, cancellationToken).ConfigureAwait(false))
