@@ -6,7 +6,9 @@
 // we additionally guard the file body with `#if WINDOWS`).
 
 #if WINDOWS
+using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
 using Smited.V1;
@@ -39,17 +41,35 @@ namespace Smited.Daemon.Owo;
 public sealed class OwoBackend : IHapticBackend
 {
     private readonly OwoBackendOptions _options;
+    private readonly IOwoSdk _sdk;
+    private readonly TimeProvider _time;
+    private readonly ILogger<OwoBackend> _logger;
+    private readonly Channel<BackendEvent> _events = Channel.CreateBounded<BackendEvent>(
+        new BoundedChannelOptions(256)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false,
+        });
 
     /// <summary>
     /// Constructed by the daemon's <c>BackendBootstrapper</c> via
-    /// <c>ActivatorUtilities.CreateInstance</c>. The skeleton commit only
-    /// takes <see cref="OwoBackendOptions"/>; subsequent commits expand
-    /// this signature with the SDK wrapper, <c>TimeProvider</c> and
-    /// <c>ILogger</c> as those collaborators come online.
+    /// <c>ActivatorUtilities.CreateInstance</c>. All collaborators are
+    /// resolved from the host DI container — <see cref="IOwoSdk"/> is
+    /// registered to <c>StaticOwoSdk</c> on Windows when
+    /// <c>EnableOwo</c> is true, otherwise this backend never gets
+    /// constructed.
     /// </summary>
-    public OwoBackend(OwoBackendOptions options)
+    public OwoBackend(
+        OwoBackendOptions options,
+        IOwoSdk sdk,
+        TimeProvider time,
+        ILogger<OwoBackend> logger)
     {
         _options = options;
+        _sdk = sdk;
+        _time = time;
+        _logger = logger;
 
         Zones = BuildZones();
         Parameters = BuildParameters();
@@ -99,16 +119,67 @@ public sealed class OwoBackend : IHapticBackend
     public Struct? Extras => null;
 
     /// <inheritdoc />
-    public IAsyncEnumerable<BackendEvent> Events =>
-        throw new NotSupportedException(
-            "Event streaming is wired in commit O3; OWO backend skeleton "
-            + "currently only exposes static descriptors.");
+    public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
     /// <inheritdoc />
-    public Task ConnectAsync(CancellationToken ct) =>
-        throw new NotSupportedException(
-            "Real ConnectAsync is wired in commit O2 against the OWO "
-            + "C# SDK; the skeleton commit only ships static descriptors.");
+    public async Task ConnectAsync(CancellationToken ct)
+    {
+        Status = BackendStatus.Disconnected;
+
+        _sdk.Configure(_options.GameDisplayName);
+
+        try
+        {
+            if (!string.IsNullOrEmpty(_options.ManualIp))
+            {
+                _logger.LogInformation(
+                    "OWO backend {Id} connecting to MyOWO at {Ip}",
+                    Id, _options.ManualIp);
+                await _sdk.ConnectAsync(_options.ManualIp).WaitAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "OWO backend {Id} auto-connecting to MyOWO; pick this entry in the MyOWO 'Scan Games' panel if pairing stalls",
+                    Id);
+                await _sdk.AutoConnectAsync().WaitAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Status = BackendStatus.Disconnected;
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Status = BackendStatus.Error;
+            _logger.LogError(ex,
+                "OWO backend {Id} failed to connect; ensure MyOWO is running and the device is paired and calibrated",
+                Id);
+            throw;
+        }
+
+        if (!_sdk.IsConnected)
+        {
+            Status = BackendStatus.Error;
+            throw new InvalidOperationException(
+                "OWO SDK reports IsConnected=false after Connect/AutoConnect succeeded");
+        }
+
+        Status = BackendStatus.Ready;
+        // The MyOWO app refuses to pair with an uncalibrated device, so the
+        // moment AutoConnect/Connect succeeds we know calibration is present.
+        // The SDK does not expose the calibration timestamp from MyOWO, so we
+        // record the connect time here as a best-effort approximation.
+        Calibration = new CalibrationState
+        {
+            Calibrated = true,
+            LastCalibratedAt = Timestamp.FromDateTimeOffset(_time.GetUtcNow()),
+        };
+
+        _logger.LogInformation(
+            "OWO backend {Id} connected, calibrated and ready", Id);
+    }
 
     /// <inheritdoc />
     public Task<BackendTriggerResult> TriggerAsync(

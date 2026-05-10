@@ -54,6 +54,26 @@ builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<Mo
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<IOptions<SmitedOptions>>().Value.Backends.Owo);
 
+// IOwoSdk is registered only on Windows + EnableOwo because StaticOwoSdk
+// imports the OWOGame namespace, which is only present in the Windows-only
+// OWO NuGet package. The implementation is loaded reflectively so this
+// project doesn't need a compile-time reference to Smited.Daemon.Owo on
+// Mac/Linux. When the assembly isn't on disk, registration is skipped — the
+// later reflective lookup of OwoBackend in BackendBootstrapper handles the
+// "EnableOwo set but assembly missing" path with a logged warning.
+if (OperatingSystem.IsWindows())
+{
+    var enableOwo = builder.Configuration.GetValue<bool>("Smited:Backends:EnableOwo");
+    if (enableOwo)
+    {
+        var staticSdkType = Type.GetType("Smited.Daemon.Owo.StaticOwoSdk, Smited.Daemon.Owo");
+        if (staticSdkType is not null)
+        {
+            builder.Services.AddSingleton(typeof(IOwoSdk), staticSdkType);
+        }
+    }
+}
+
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE
 // BackendBootstrapper publishes its initial registration events —

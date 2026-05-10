@@ -29,14 +29,17 @@
   </ItemGroup>
 
   <!--
-    The OwoBackend body uses OWO SDK types unconditionally inside
-    `#if WINDOWS`. Targeting `net9.0-windows` means the WINDOWS symbol
-    is defined regardless of build host, so we exclude the file from
-    compile when building on a non-Windows host where the OWO package
-    isn't restored.
+    OwoBackend and StaticOwoSdk both reference the OWO SDK's `OWOGame`
+    namespace. Targeting `net9.0-windows` means the WINDOWS symbol is
+    defined regardless of build host, so we additionally exclude these
+    files from compile when building on a non-Windows host where the OWO
+    package isn't restored. The remaining files in this project (none
+    today, but a future cross-platform helper would qualify) compile
+    everywhere.
   -->
   <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
     <Compile Remove="OwoBackend.cs" />
+    <Compile Remove="StaticOwoSdk.cs" />
   </ItemGroup>
 
 </Project>
