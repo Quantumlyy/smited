@@ -7,11 +7,13 @@
 
 #if WINDOWS
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 
@@ -178,6 +180,17 @@ public sealed class OwoBackend : IHapticBackend
 
     /// <inheritdoc />
     public Struct? Extras => null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// OWO's manufacturer does not publish a region map; intensity
+    /// safety is handled by the device's calibration ceiling rather
+    /// than zone-level bans. Returns an empty set so the bodymap
+    /// validator only enforces smited's own conservative defaults
+    /// against OWO placements.
+    /// </remarks>
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } =
+        ImmutableHashSet<BodyRegion>.Empty;
 
     /// <inheritdoc />
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();

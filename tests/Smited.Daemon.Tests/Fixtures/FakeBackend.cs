@@ -1,7 +1,9 @@
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 
 namespace Smited.Daemon.Tests.Fixtures;
@@ -52,6 +54,9 @@ internal sealed class FakeBackend : IHapticBackend
     public CalibrationState? Calibration { get; init; }
 
     public Struct? Extras { get; init; }
+
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; init; } =
+        ImmutableHashSet<BodyRegion>.Empty;
 
     public Func<BackendTriggerRequest, CancellationToken, Task<BackendTriggerResult>>? OnTrigger { get; set; }
 

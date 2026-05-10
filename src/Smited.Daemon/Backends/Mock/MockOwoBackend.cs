@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
 
@@ -115,6 +117,16 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
     public CalibrationState? Calibration => _calibration;
 
     public Struct? Extras => null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The mock has no real hardware to protect, so it returns an
+    /// empty set. Tests that exercise the bodymap validator's
+    /// <c>ManufacturerForbidden</c> path use a custom fake backend
+    /// with populated forbidden regions instead.
+    /// </remarks>
+    public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } =
+        ImmutableHashSet<BodyRegion>.Empty;
 
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 

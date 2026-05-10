@@ -30,6 +30,13 @@ public sealed class SmitedOptions
 
     public BackendsOptions Backends { get; set; } = new();
 
+    /// <summary>
+    /// Daemon-internal bodymap configuration: declared zone placements
+    /// and overlap policy. Defaults to empty (unmapped mode); see
+    /// <see cref="BodyMapOptions"/> for shape.
+    /// </summary>
+    public BodyMapOptions BodyMap { get; set; } = new();
+
     public SensationsOptions Sensations { get; set; } = new();
 
     public EventBusOptions EventBus { get; set; } = new();

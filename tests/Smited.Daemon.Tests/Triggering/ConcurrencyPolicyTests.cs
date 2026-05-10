@@ -177,6 +177,8 @@ public class ConcurrencyPolicyTests
         public ConcurrencyModel Concurrency { get; }
         public CalibrationState? Calibration => null;
         public Google.Protobuf.WellKnownTypes.Struct? Extras => null;
+        public IReadOnlySet<Smited.Daemon.BodyMap.BodyRegion> ForbiddenRegions { get; } =
+            global::System.Collections.Immutable.ImmutableHashSet<Smited.Daemon.BodyMap.BodyRegion>.Empty;
 
         public BackendTriggerRequest? LastRequest { get; private set; }
 
