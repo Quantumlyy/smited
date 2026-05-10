@@ -11,13 +11,13 @@ The daemon is a thin layer between gRPC clients and pluggable haptic backends. E
                 ┌────────────────────────────────────────────┐
                 │           gRPC clients (LAN/localhost)      │
                 │   Stream Deck • multiplexer • CI hook       │
-                └───────────────┬─────────────┬──────────────┘
-                                │             │ HTTP/1.1 GET/POST
-                                │ HTTP/2 h2c  │
-                ┌───────────────▼─────────────▼──────────────┐
+                └───────────────┬─────────────┬─────────┬────┘
+                                │             │ HTTP/1.1│ HTTP/1.1
+                                │ HTTP/2 h2c  │   POST  │   GET
+                ┌───────────────▼─────────────▼─────────▼────┐
                 │                Kestrel                     │
-                │   :7777 (gRPC)                :7778 (panic)│
-                └───────────────┬─────────────┬──────────────┘
+                │   :7777 gRPC   :7778 panic   :7779 admin   │
+                └───────────────┬─────────────┬─────────┬────┘
                                 │             │
               ┌─────────────────▼──┐   ┌──────▼─────────────────┐
               │ ProtovalidateInterc│   │ PanicEndpoint          │
@@ -101,7 +101,15 @@ JSON files under `LibraryRoot/<backend_kind>/*.json` are loaded at boot by `Sens
 
 `PanicEndpoint` exposes `/panic` on a separate Kestrel listener (HTTP/1.1, default port 7778). Cancels every active sensation regardless of gRPC state. No auth; LAN/localhost binding is the access control. Logs every invocation at `Critical` so post-mortems have an immediate answer to "why did everything stop".
 
-`StartupBanner` renders a Spectre.Console panel after `ApplicationStarted` showing both ports, backend count, and sensations loaded count.
+`StartupBanner` renders a Spectre.Console panel after `ApplicationStarted` showing all three listener ports, backend count, sensation count, and history-database path (or `disabled`).
+
+### Admin UI (`Admin/`)
+
+Blazor Server pages on port 7779, hosted in the same `WebApplication` as the gRPC server and panic endpoint. Components inject daemon services (`BackendRegistry`, `TriggerCoordinator`, `EventBus`, `SensationLibrary`, history factory) directly — no gRPC roundtrip. Live updates ride Blazor Server's existing SignalR connection; per-component subscriptions to the in-process `EventBus` re-render on each event.
+
+This means the admin UI has access to capabilities the gRPC schema doesn't expose (history queries, internal coordinator state). When those prove useful for external clients, a future schema bump exposes them; the admin UI doesn't wait. The Kestrel listener for the admin port is gated by `Smited:Admin:Enabled` (default true) so headless deployments can omit it.
+
+Authentication is intentionally absent in v1: the admin port binds to `127.0.0.1`. The third-port architecture makes a future shared-secret middleware addition cheap (it goes in `MapWhen` on the admin branch only). See [`docs/admin.md`](docs/admin.md) for the panel reference and the no-auth caveat.
 
 ## Cross-platform conditional compilation
 
