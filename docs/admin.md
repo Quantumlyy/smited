@@ -56,25 +56,38 @@ even when gRPC is bound to the LAN.
   display name, status pill, capability badges, calibration state,
   concurrency model (`Policy` and `MaxConcurrent`), zone counts, and
   live in-flight sensation count. Each card has a **Stop all** button
-  that calls `TriggerCoordinator.StopBackendAsync(id)`.
+  that cancels every active sensation on that backend.
 
 - **Sensation tester** — pick backend, pick sensation, click **FIRE**.
-  Optional overrides (collapsed by default): intensity scale (0–200%),
-  priority, trace ID. The result line shows `accepted=true` plus the
-  resolved sensation id, or `accepted=false` plus the error code/field/
-  message on rejection.
+  The result line shows `accepted=true` plus the resolved sensation id,
+  or `accepted=false` plus the error code/field/message on rejection.
+  Optional overrides (collapsed by default):
+  - **Intensity scale (`0..100`)** — override the sensation's authored
+    `default_intensity`. Leave empty to use the sensation's default;
+    supply a value to override. Range matches the gRPC
+    `intensity_scale` contract; values above 100 are not supported.
+  - **Priority** — integer; higher preempts lower under the
+    `PRIORITY` concurrency policy. No documented range; pass through.
+  - **Trace ID** — echoed back on lifecycle events. Auto-generated
+    GUID if left blank.
 
 - **Recent triggers** — last 50 triggers, backfilled from the history
   database on page load and live-appended on
   `SensationCompleted` / `SensationCancelled` events. Click a row to
   expand for full forensic detail (sensation id, zones, intensity,
-  priority, trace, error).
+  priority, trace, error). Backfill rows are labelled `Accepted` /
+  `Rejected` rather than `Completed` / `Failed` because the trigger
+  record only knows whether the coordinator accepted the call — the
+  final outcome lives in the lifecycle event stream that produces the
+  live rows.
 
-- **Panic button** — big red button at the bottom. Calls
-  `TriggerCoordinator.StopAsync(All=true)` — the same code path the
-  `/panic` HTTP endpoint uses. Increments the session panic counter
-  rendered below the button. **Press `Esc`** anywhere on the page to fire
-  the same handler.
+- **Panic button** — big red button at the bottom. Cancels every
+  active sensation across every backend — the same code path the
+  `/panic` HTTP endpoint uses, dispatched through the in-process
+  `SmitedActionService` so admin-fired and HTTP-fired panics produce
+  identical history rows and CRITICAL-level audit log lines.
+  Increments the session panic counter rendered below the button.
+  **Press `Esc`** anywhere on the page to fire the same handler.
 
 ## Troubleshooting
 
