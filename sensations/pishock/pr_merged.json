@@ -5,7 +5,7 @@
   "description": "Soft vibrate followed by a confirmation beep — your PR landed.",
   "tags": ["dev", "github", "pr", "success"],
   "default_zone_ids": ["shock"],
-  "default_intensity": 40,
+  "default_intensity": 100,
   "estimated_duration": "0.4s",
   "definition": {
     "microsensations": [

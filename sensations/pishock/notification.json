@@ -5,7 +5,7 @@
   "description": "Short beep — generic notification cue.",
   "tags": ["notification"],
   "default_zone_ids": ["shock"],
-  "default_intensity": 30,
+  "default_intensity": 100,
   "estimated_duration": "0.1s",
   "definition": {
     "microsensations": [

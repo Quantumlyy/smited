@@ -5,7 +5,7 @@
   "description": "Long firm vibrate — production rejected the build.",
   "tags": ["dev", "deploy", "failure"],
   "default_zone_ids": ["shock"],
-  "default_intensity": 70,
+  "default_intensity": 100,
   "estimated_duration": "0.8s",
   "definition": {
     "microsensations": [

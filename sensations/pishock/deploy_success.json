@@ -5,7 +5,7 @@
   "description": "Three short pulses — production caught the new build.",
   "tags": ["dev", "deploy", "success"],
   "default_zone_ids": ["shock"],
-  "default_intensity": 50,
+  "default_intensity": 100,
   "estimated_duration": "0.7s",
   "definition": {
     "microsensations": [

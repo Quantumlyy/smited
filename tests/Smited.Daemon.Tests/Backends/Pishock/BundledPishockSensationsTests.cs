@@ -98,6 +98,39 @@ public class BundledPishockSensationsTests
         computed.Should().Be(dto.EstimatedDuration);
     }
 
+    [Theory]
+    [MemberData(nameof(AllFiles))]
+    public void Trigger_without_override_fires_at_authored_intensity_no_double_scale(string filename)
+    {
+        // The coordinator applies a sensation file's default_intensity
+        // as IntensityScale when the trigger doesn't override it; the
+        // PiShock backend then multiplies the authored microsensation
+        // intensity by that scale. Bundled files setting
+        // default_intensity equal to the authored intensity would
+        // double-scale: compile_error_mild authored at 30% and
+        // default_intensity 30 would fire at 30*30/100 = 9% instead
+        // of the documented 30%.
+        //
+        // The bundled convention: default_intensity=100 (no
+        // attenuation by default), so trigger-without-override fires
+        // at the authored microsensation intensity. Override
+        // attenuates from there proportionally.
+        var dto = LoadFile(filename);
+
+        uint? resolvedIntensity = dto.DefaultIntensity;
+
+        foreach (var micro in dto.Definition.Microsensations)
+        {
+            var authored = (int)((ParameterValue.Number)micro.Parameters["intensity"]).Value;
+            var effective = MicrosensationReader.ApplyIntensityScale(authored, resolvedIntensity);
+
+            effective.Should().Be(authored,
+                "trigger-without-override on '{0}' should fire at the authored "
+                + "microsensation intensity {1}, not double-scaled",
+                filename, authored);
+        }
+    }
+
     [Fact]
     public void Bundled_set_includes_every_planned_sensation()
     {

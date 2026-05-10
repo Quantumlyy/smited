@@ -5,7 +5,7 @@
   "description": "Brief vibrate — light haptic confirmation of a recoverable error.",
   "tags": ["dev", "feedback", "error", "mild"],
   "default_zone_ids": ["shock"],
-  "default_intensity": 30,
+  "default_intensity": 100,
   "estimated_duration": "0.5s",
   "definition": {
     "microsensations": [

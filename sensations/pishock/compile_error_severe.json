@@ -5,7 +5,7 @@
   "description": "Stronger sustained vibrate — many errors at once or a critical failure.",
   "tags": ["dev", "feedback", "error", "severe"],
   "default_zone_ids": ["shock"],
-  "default_intensity": 60,
+  "default_intensity": 100,
   "estimated_duration": "1.0s",
   "definition": {
     "microsensations": [
