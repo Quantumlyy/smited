@@ -28,6 +28,8 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
         new(StringComparer.OrdinalIgnoreCase);
 
     private CalibrationState _calibration;
+    private string _id = "mock-owo";
+    private string _displayName = "Mock OWO Skin";
 
     public MockOwoBackend(TimeProvider time, ILogger<MockOwoBackend> logger)
     {
@@ -47,11 +49,55 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
         };
     }
 
-    public string Id => "mock-owo";
+    public string Id => _id;
 
     public string Kind => "owo_skin";
 
-    public string DisplayName => "Mock OWO Skin";
+    public string DisplayName => _displayName;
+
+    /// <summary>
+    /// Replaces the default <see cref="Id"/> with a per-descriptor
+    /// override at startup. Idempotent for the same value; throws on a
+    /// conflicting second override so the descriptor validator's
+    /// "single mock_owo descriptor" rule isn't silently bypassed when
+    /// it fails to fire.
+    /// </summary>
+    internal void OverrideId(string id)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        if (string.Equals(_id, id, StringComparison.Ordinal))
+        {
+            return;
+        }
+        if (!string.Equals(_id, "mock-owo", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"MockOwoBackend.Id was already overridden to '{_id}'; cannot re-override to '{id}'. "
+                + "Configure at most one mock_owo descriptor.");
+        }
+        _id = id;
+    }
+
+    /// <summary>
+    /// Replaces the default <see cref="DisplayName"/> with a
+    /// per-descriptor override. Same idempotency / single-override
+    /// rules as <see cref="OverrideId"/>.
+    /// </summary>
+    internal void OverrideDisplayName(string displayName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(displayName);
+        if (string.Equals(_displayName, displayName, StringComparison.Ordinal))
+        {
+            return;
+        }
+        if (!string.Equals(_displayName, "Mock OWO Skin", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"MockOwoBackend.DisplayName was already overridden to '{_displayName}'; cannot re-override to '{displayName}'. "
+                + "Configure at most one mock_owo descriptor.");
+        }
+        _displayName = displayName;
+    }
 
     public BackendStatus Status => BackendStatus.Ready;
 

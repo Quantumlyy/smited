@@ -38,6 +38,21 @@ public sealed class SmitedOptions
 
     public sealed class BackendsOptions
     {
+        /// <summary>
+        /// Backend descriptors to bring online at startup. Each entry
+        /// names a kind and an instance id; the daemon resolves the
+        /// matching <c>IBackendFactory</c> and lets it construct the
+        /// backend. Per-instance configuration sits under the entry's
+        /// <c>Options</c> sub-section.
+        /// </summary>
+        /// <remarks>
+        /// Lands in Commit 1 alongside the legacy boolean knobs. The
+        /// bootstrapper does not consume <see cref="Items"/> until
+        /// Commit 2; Commit 1 simply makes the new shape bindable so
+        /// tests covering descriptor binding can be written.
+        /// </remarks>
+        public List<BackendDescriptor> Items { get; set; } = new();
+
         public bool EnableMockOwo { get; set; } = true;
         public bool EnableOwo { get; set; }
 
