@@ -199,14 +199,27 @@ To run with no backends at all (uncommon — the daemon's gRPC surface will repo
 
 The `Enabled: false` keeps the descriptor from tripping the "no factory registered for kind" warning at registration time; the validator itself only requires `Kind` and `Id` to be present.
 
-### Migrating from the old boolean shape
+### Migrating from the legacy Smited:Backends boolean knobs
 
-If you have an existing user-config file from before the descriptor refactor, replace each boolean with the equivalent descriptor entry:
+Pre-v0.2, `Smited:Backends` accepted boolean toggles:
 
-| Before | After |
+```json
+{
+  "Smited": {
+    "Backends": {
+      "EnableMockOwo": true,
+      "EnableOwo": false,
+      "Owo": { "GameDisplayName": "..." }
+    }
+  }
+}
+```
+
+These keys are removed in v0.2. Replace with an explicit `Items` array. The daemon does not read `EnableMockOwo`, `EnableOwo`, or `Owo` anymore — a configuration that still uses those keys is treated as if `Backends` were empty, which under the empty-Items default fallback registers `mock-owo` (NOT zero backends — the synthesis behavior is described in [Disabling the default mock backend](#disabling-the-default-mock-backend) above).
+
+| Pre-v0.2 | v0.2+ |
 |---|---|
-| `"EnableMockOwo": true` | `{ "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true }` |
-| `"EnableOwo": true` plus `"Owo": { ... }` | `{ "Kind": "owo_skin", "Id": "owo-primary", "Enabled": true, "Options": { ... } }` |
-| `"EnableMockOwo": false` | omit the descriptor entirely, or set `"Enabled": false` |
-
-The daemon does not read `EnableMockOwo`, `EnableOwo`, or `Owo` anymore. A configuration that still uses those keys will silently start with zero backends registered.
+| `"EnableMockOwo": true` (the default) | Omit `Items` entirely, or set `"Items": []`. The daemon synthesizes the default `mock-owo` descriptor at startup. |
+| `"EnableMockOwo": true` + `"EnableOwo": true` + `"Owo": { ... }` | An `Items` array with one `mock_owo` descriptor and one `owo_skin` descriptor whose `Options` carries the previous `Owo` sub-section. |
+| `"EnableOwo": true` + `"Owo": { ... }` (no mock) | An `Items` array with only the `owo_skin` descriptor — non-empty `Items` suppresses the default-mock synthesis. |
+| `"EnableMockOwo": false` (no backends at all) | An `Items` array with a single `Enabled: false` placeholder — see "[no backends at all](#disabling-the-default-mock-backend)" above for why a non-empty array is needed. |
