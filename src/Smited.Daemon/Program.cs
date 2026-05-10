@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ProtoValidate;
 using Serilog;
+using Smited.Daemon.Admin;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
 using Smited.Daemon.Configuration;
@@ -152,6 +153,8 @@ builder.Services.AddGrpc(o =>
 });
 builder.Services.AddGrpcReflection();
 
+builder.Services.AddSmitedAdmin();
+
 builder.WebHost.ConfigureKestrel(o =>
 {
     var smited = builder.Configuration.GetSection("Smited").Get<SmitedOptions>() ?? new SmitedOptions();
@@ -163,6 +166,14 @@ builder.WebHost.ConfigureKestrel(o =>
     // Emergency-stop endpoint over HTTP/1.1 — separate listener so a wedged
     // gRPC pipeline can't take the panic button down with it.
     o.Listen(bind, smited.PanicPort, lo => lo.Protocols = HttpProtocols.Http1);
+
+    // Admin UI over HTTP/1.1 — separate listener so the admin port can be
+    // bound to 127.0.0.1 even when gRPC is opened to the LAN.
+    if (smited.Admin.Enabled)
+    {
+        var adminBind = IPAddress.Parse(smited.Admin.BindAddress);
+        o.Listen(adminBind, smited.Admin.Port, lo => lo.Protocols = HttpProtocols.Http1);
+    }
 });
 
 var app = builder.Build();
@@ -173,6 +184,26 @@ if (app.Configuration.GetValue<bool>("Smited:EnableReflection"))
     app.MapGrpcReflectionService();
 }
 app.MapPanic();
+
+// Admin UI pipeline gated to its own port so gRPC and panic stay isolated
+// from Blazor's HTTP/1.1 routing, static-file middleware, and SignalR hub.
+{
+    var adminOpts = app.Services.GetRequiredService<IOptions<SmitedOptions>>().Value.Admin;
+    if (adminOpts.Enabled)
+    {
+        var adminPort = adminOpts.Port;
+        app.MapWhen(ctx => ctx.Connection.LocalPort == adminPort, branch =>
+        {
+            branch.UseStaticFiles();
+            branch.UseRouting();
+            branch.UseEndpoints(endpoints =>
+            {
+                endpoints.MapBlazorHub();
+                endpoints.MapFallbackToPage("/_Host");
+            });
+        });
+    }
+}
 
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() =>

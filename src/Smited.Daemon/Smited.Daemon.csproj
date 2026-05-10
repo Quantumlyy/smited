@@ -180,6 +180,16 @@
   </ItemGroup>
 
   <!--
+    The Microsoft.NET.Sdk.Web SDK adds wwwroot/** to CopyToPublishDirectory
+    by default, but `dotnet run` serves from the build output (bin/...),
+    not the publish output. Update the implicit Content items so admin.css
+    and friends also flow through CopyToOutputDirectory.
+  -->
+  <ItemGroup>
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
     Copy the repo's sensation library next to the binary so the daemon's
     default `./sensations` LibraryRoot resolves to it regardless of where
     `dotnet run` is invoked from.
