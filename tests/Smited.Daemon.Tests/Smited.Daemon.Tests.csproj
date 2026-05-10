@@ -50,6 +50,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(_TargetingWindows)' != 'true'">
+    <Compile Remove="Backends\AddOwoBackendIfWindowsTests.cs" />
     <Compile Remove="Backends\OwoBackendFactoryTests.cs" />
     <Compile Remove="Backends\OwoBackendLifecycleTests.cs" />
     <Compile Remove="Backends\OwoBackendTests.cs" />
