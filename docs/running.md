@@ -20,12 +20,13 @@ Expected log output (Production environment):
 [INF] Now listening on: http://127.0.0.1:7778
 [INF] Application started. Press Ctrl+C to shut down.
 [INF] Hosting environment: Production
-╭─smited───────────────────────────────────────────────╮
-│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on) │
-│ Panic       POST http://127.0.0.1:7778/panic         │
-│ Backends    1 registered                             │
-│ Sensations  5 loaded                                 │
-╰──────────────────────────────────────────────────────╯
+╭─smited──────────────────────────────────────────────╮
+│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)│
+│ Panic       POST http://127.0.0.1:7778/panic        │
+│ Backends    1 registered                            │
+│ Body map    Not configured (warnings off)           │
+│ Sensations  5 loaded                                │
+╰─────────────────────────────────────────────────────╯
 ```
 
 Logs roll daily into `logs/smited-YYYYMMDD.log` next to the binary. Set `ASPNETCORE_ENVIRONMENT=Development` to use `appsettings.Development.json` (binds `0.0.0.0`, increases log level to `Debug`).
@@ -102,8 +103,10 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:PanicPort` | `7778` | `/panic` HTTP/1.1 listener |
 | `Smited:BindAddress` | `127.0.0.1` | Flip to `0.0.0.0` for LAN |
 | `Smited:EnableReflection` | `true` | grpcurl-friendly |
-| `Smited:Backends:EnableMockOwo` | `true` | Always-on mock for development |
-| `Smited:Backends:EnableOwo` | `false` | Real OWO; Windows-only |
+| `Smited:Backends:Items` | _array, see below_ | Backends to bring online at startup |
+| `Smited:BodyMap:OverlapPolicy` | `Warn` | `Warn` / `Refuse` / `Off`; see [`docs/body-map.md`](body-map.md) |
+| `Smited:BodyMap:Placements` | _array_ | Per-backend zone-to-region declarations |
+| `Smited:BodyMap:AllowOverrideRegions` | `[]` | Opt out of smited's default forbidden regions |
 | `Smited:Sensations:LibraryRoot` | `./sensations` | Resolved relative to the binary |
 | `Smited:EventBus:BufferCapacity` | `1024` | Per-subscriber channel capacity |
 | `Smited:EventBus:SlowSubscriberPolicy` | `drop_oldest` | Channel `FullMode` for slow consumers |
@@ -111,4 +114,58 @@ Defaults live in `src/Smited.Daemon/appsettings.json` and the spec is documented
 | `Smited:History:RetentionDays` | `30` | Days to keep rows; `0` = forever |
 | `Smited:History:CustomPath` | _unset_ | Override the SQLite path |
 
-History is daemon-internal — see [`docs/history.md`](history.md) for the schema and example queries.
+History is daemon-internal — see [`docs/history.md`](history.md) for the schema and example queries. The bodymap is also daemon-internal — see [`docs/body-map.md`](body-map.md) for what placements do and the region taxonomy.
+
+### Backend descriptors
+
+Backends used to be enabled with per-backend booleans (`EnableMockOwo`, `EnableOwo`). The current shape is a typed array of descriptors — each descriptor names a kind and an instance id, and the daemon dispatches it to the matching `IBackendFactory`. Per-instance configuration (e.g. OWO's `GameDisplayName`, `ManualIp`) lives under the descriptor's `Options` sub-section.
+
+Mock-only:
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  { "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true }
+] } } }
+```
+
+Real OWO only (Windows host):
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  {
+    "Kind": "owo_skin",
+    "Id": "owo-primary",
+    "Enabled": true,
+    "Options": {
+      "GameDisplayName": "smited haptic daemon",
+      "ManualIp": "192.168.1.42",
+      "MaxReconnectAttempts": 3,
+      "HeartbeatSeconds": 5
+    }
+  }
+] } } }
+```
+
+Both side-by-side:
+
+```json
+{ "Smited": { "Backends": { "Items": [
+  { "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true },
+  { "Kind": "owo_skin", "Id": "owo-primary", "Enabled": true,
+    "Options": { "GameDisplayName": "smited haptic daemon" } }
+] } } }
+```
+
+`Enabled: false` keeps a descriptor in the file but skips registration — useful when you want to hold onto the configuration for hardware you've temporarily disconnected.
+
+### Migrating from the old boolean shape
+
+If you have an existing user-config file from before the descriptor refactor, replace each boolean with the equivalent descriptor entry:
+
+| Before | After |
+|---|---|
+| `"EnableMockOwo": true` | `{ "Kind": "mock_owo", "Id": "mock-owo", "Enabled": true }` |
+| `"EnableOwo": true` plus `"Owo": { ... }` | `{ "Kind": "owo_skin", "Id": "owo-primary", "Enabled": true, "Options": { ... } }` |
+| `"EnableMockOwo": false` | omit the descriptor entirely, or set `"Enabled": false` |
+
+The daemon does not read `EnableMockOwo`, `EnableOwo`, or `Owo` anymore. A configuration that still uses those keys will silently start with zero backends registered.

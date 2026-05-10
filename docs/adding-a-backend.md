@@ -57,27 +57,79 @@ private void Emit(BackendEvent evt) => _events.Writer.TryWrite(evt);
 
 Fire `SensationStarted` immediately on accept, `SensationCompleted` on natural finish, `SensationCancelled` on cancellation. The `BackendBootstrapper` spins up a fan-out task per backend that forwards every event into the daemon's `EventBus` — you don't write to the bus directly.
 
-### 5. Wire it into DI
+### 5. Implement an `IBackendFactory` and wire it into DI
 
-`Program.cs`:
-
-```csharp
-builder.Services.AddSingleton<HapticVestBackend>();
-```
-
-Then in `BackendBootstrapper.StartAsync`, register conditionally:
+`BackendBootstrapper` does not special-case any backend kind. It iterates `Smited:Backends:Items[]`, resolves a matching `IBackendFactory` (case-insensitive on `Kind`), and asks the factory to build the backend from the descriptor and its `Options` sub-section. To add a new backend you ship one factory:
 
 ```csharp
-if (_options.Backends.EnableHapticVest)
+internal sealed class HapticVestBackendFactory : IBackendFactory
 {
-    var vest = _services.GetRequiredService<HapticVestBackend>();
-    RegisterAndFan(vest);
+    public string Kind => "haptic_vest";
+
+    public IHapticBackend? TryCreate(
+        BackendDescriptor descriptor,
+        IConfigurationSection optionsSection,
+        IServiceProvider services,
+        ILogger logger)
+    {
+        var options = optionsSection.Get<HapticVestBackendOptions>() ?? new HapticVestBackendOptions();
+        if (!string.IsNullOrEmpty(descriptor.Id))
+        {
+            options.BackendId = descriptor.Id;
+        }
+        return ActivatorUtilities.CreateInstance<HapticVestBackend>(services, options);
+    }
 }
 ```
 
-Add the `EnableHapticVest` flag to `SmitedOptions.BackendsOptions` and to `appsettings.json`.
+Then register the factory next to the other built-ins in `Program.cs` (or a service-collection extension):
 
-### 6. Sensation library directory
+```csharp
+services.TryAddEnumerable(
+    ServiceDescriptor.Singleton<IBackendFactory, HapticVestBackendFactory>());
+```
+
+Return `null` from `TryCreate` if the runtime environment can't host the backend (wrong OS, missing assembly, broken runtime dep). Throw only on **user-fixable misconfiguration**; the bootstrapper logs a null-return as `INFO` and continues with the next descriptor.
+
+Users opt the backend in by adding a descriptor to their config:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        {
+          "Kind": "haptic_vest",
+          "Id": "vest-primary",
+          "Enabled": true,
+          "Options": {
+            "GameDisplayName": "smited haptic daemon"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+`BackendDescriptor.Id` is what clients use as `backend_id` over the wire and what the bodymap framework keys placements on.
+
+#### Multi-instance gotchas
+
+`MockOwoBackend` is a DI singleton because `IMockOwoController` (used by tests) holds a reference to the same instance. The descriptor validator therefore allows at most one `mock_owo` descriptor. Real-hardware backends should be **transient** — `ActivatorUtilities.CreateInstance` creates a fresh backend per `TryCreate` call — so a user with two devices can declare two descriptors of the same kind with different ids. A backend that owns a singleton SDK (like OWO's `IOwoSdk`) needs to consider how the singleton behaves under multi-instance use; today's OWO factory will technically register two backends, but they'd fight over the same SDK and only one would work at a time.
+
+### 6. Declare manufacturer-mandated forbidden regions
+
+If the backend's hardware should never fire on certain body regions per the manufacturer's safety guidance — TENS-class devices over the heart, devices contraindicated near the carotid, etc. — populate `ForbiddenRegions`:
+
+```csharp
+public IReadOnlySet<BodyRegion> ForbiddenRegions { get; } =
+    ImmutableHashSet.Create(BodyRegion.ChestOverHeart, BodyRegion.Throat);
+```
+
+The bodymap validator refuses to register the backend at startup if a declared placement lands in any of these regions; this list is **non-overridable**. Backends that have no manufacturer-stated bans return `ImmutableHashSet<BodyRegion>.Empty` (both the mock and real OWO backends do — OWO's calibration ceiling handles intensity safety). See [`docs/body-map.md`](body-map.md) for the full taxonomy and the smited-default forbidden regions that every backend inherits.
+
+### 7. Sensation library directory
 
 Drop a `sensations/<your_kind>/*.json` directory at the repo root (or wherever `Smited:Sensations:LibraryRoot` points). At boot, `SensationLoader` picks up files whose `backend_kind` matches the backend's `Kind` field. Files with the default `scope: "kind"` bind to every backend instance of that kind; files with `scope: "id"` bind only to their `backend_id` and are skipped if that backend is absent. Schema validation (parameter types, ranges, required fields, zone IDs) runs against each target backend's `ParameterSchema` and `ZoneTopology` before the daemon finishes starting; a failing file aborts startup with the path and offending field.
 
@@ -112,7 +164,7 @@ If the backend should accept runtime registrations via the `RegisterSensation` R
 
    Without `EnableWindowsTargeting`, cross-publishing a `net9.0-windows` project from a non-Windows host fails because the Windows desktop SDK refuses to load.
 4. The platform project references `Smited.Daemon.Abstractions` (so it can see `IHapticBackend` and any cross-platform helper types like `OwoBackendOptions`/`IOwoSdk`).
-5. The daemon project's reverse `ProjectReference` is conditional on `_TargetingWindows` and uses `<ReferenceOutputAssembly>false</ReferenceOutputAssembly>` so the build graph stays acyclic. Daemon source never imports the backend type — `BackendBootstrapper` loads it via `Type.GetType("Smited.Daemon.<Platform>.<Platform>Backend, Smited.Daemon.<Platform>")` at runtime. Auxiliary singletons the backend depends on (e.g. an `IOwoSdk` impl) follow the same reflective-registration pattern in `Program.cs`.
+5. The daemon project's reverse `ProjectReference` is conditional on `_TargetingWindows` and uses `<ReferenceOutputAssembly>false</ReferenceOutputAssembly>` so the build graph stays acyclic. Daemon source never imports the backend type — `BackendsServiceCollectionExtensions.AddOwoBackendIfWindows` loads both `OwoBackendFactory` and `StaticOwoSdk` via `Type.GetType("Smited.Daemon.<Platform>.<Type>, Smited.Daemon.<Platform>")` at runtime, wrapped in `FileNotFoundException` / `FileLoadException` / `TypeLoadException` catches. Both the factory class and any auxiliary singletons it depends on (e.g. an `IOwoSdk` impl) must be `public sealed class` so cross-assembly reflective instantiation works.
 
 ## Tests
 
