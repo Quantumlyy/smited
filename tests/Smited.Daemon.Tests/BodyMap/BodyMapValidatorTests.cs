@@ -476,6 +476,62 @@ public class BodyMapValidatorTests
     }
 
     [Fact]
+    public void Unspecified_region_with_empty_zones_does_not_emit_EmptyPlacement()
+    {
+        // An Unspecified placement is documented as "not part of the
+        // body map" — every check should skip it, including the
+        // empty-zone gate. Operators using Unspecified as a
+        // documentation placeholder ("I'll fill this in later")
+        // shouldn't have to also remember to pre-populate ZoneIds.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = new List<string>(),
+                    Region = BodyRegion.Unspecified,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Unspecified_region_with_unknown_backend_does_not_emit_UnknownBackend()
+    {
+        // An Unspecified placement targeting an unknown backend id
+        // should also be silently skipped — Unspecified means "not
+        // part of the body map," and that takes precedence over the
+        // backend-id check. This is the placeholder shape an operator
+        // might leave for hardware they haven't connected yet.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "future-hardware",
+                    ZoneIds = { "tbd" },
+                    Region = BodyRegion.Unspecified,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Same_zone_in_two_placements_with_different_regions_is_DuplicateZonePlacement()
     {
         var backend = MakeFake("vest", zones: ["pectoral_l"]);

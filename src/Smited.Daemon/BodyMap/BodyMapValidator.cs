@@ -143,12 +143,26 @@ internal sealed class BodyMapValidator
             .Except(options.AllowOverrideRegions)
             .ToImmutableHashSet();
 
+        // Pre-pass: drop Unspecified-region placements entirely.
+        // BodyRegion.Unspecified is documented as "not part of the
+        // body map" — silently ignored by every check, including the
+        // empty-zone and unknown-backend gates that would otherwise
+        // reject placeholder entries the operator hasn't filled in
+        // yet. A placement with Region: Unspecified contributes
+        // nothing to the indexes and nothing useful to error
+        // reporting; treating it as inert lets the user keep
+        // documentation-shaped placeholders in their config without
+        // tripping startup.
+        var consideredPlacements = options.Placements
+            .Where(p => p.Region != BodyRegion.Unspecified)
+            .ToArray();
+
         // Pass 0: surface placements with no zones. The expand pass
         // would otherwise no-op for them, leaving the misconfiguration
         // invisible (no errors, no index entries) while still inflating
         // BodyMapState.PlacementCount on the banner. Empty/null
         // ZoneIds is a fatal validation error.
-        foreach (var placement in options.Placements)
+        foreach (var placement in consideredPlacements)
         {
             if (placement.ZoneIds is null || placement.ZoneIds.Count == 0)
             {
@@ -166,10 +180,9 @@ internal sealed class BodyMapValidator
         // Pass 1: validate backend ids and expand each non-empty
         // placement into its (backend, leafZone, region, source)
         // tuples. UnknownBackend, BackendDeclined, and UnknownZone
-        // errors land here. Placements with an Unspecified region
-        // are silently skipped.
+        // errors land here.
         var expanded = new List<ExpandedPlacement>();
-        foreach (var placement in options.Placements)
+        foreach (var placement in consideredPlacements)
         {
             if (placement.ZoneIds is null || placement.ZoneIds.Count == 0)
             {
@@ -205,11 +218,6 @@ internal sealed class BodyMapValidator
                         $"Placement references backend '{placement.BackendId}' which is "
                         + "not declared in Smited:Backends:Items." + hint));
                 }
-                continue;
-            }
-
-            if (placement.Region == BodyRegion.Unspecified)
-            {
                 continue;
             }
 
