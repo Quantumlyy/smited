@@ -34,6 +34,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Smited.Daemon\Smited.Daemon.csproj" />
+    <!--
+      Direct compile-time reference so tests can construct PiShock types
+      (MockPishockBackend, PishockBackendOptions, TokenBucket). The
+      cross-platform PiShock project always builds, so unlike the OWO
+      reference there's no _TargetingWindows guard.
+    -->
+    <ProjectReference Include="..\..\src\Smited.Daemon.Pishock\Smited.Daemon.Pishock.csproj" />
   </ItemGroup>
 
   <!--

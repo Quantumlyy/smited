@@ -29,6 +29,13 @@
       compile-time dependency on the daemon host.
     -->
     <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
+    <!--
+      PiShock is cross-platform HTTP, so the daemon takes a plain
+      ProjectReference (not the reverse-reference dance the OWO project
+      requires). The factory loads through normal DI registration in
+      BackendsServiceCollectionExtensions.AddSmitedBackends().
+    -->
+    <ProjectReference Include="..\Smited.Daemon.Pishock\Smited.Daemon.Pishock.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -177,6 +177,48 @@ public class BackendBootstrapperDescriptorTests
         ex.Which.Failures.Should().Contain(s => s.Contains("Kind is required"));
     }
 
+    [Fact]
+    public async Task Mock_pishock_descriptor_registers_with_pishock_kind()
+    {
+        var items = new[]
+        {
+            new BackendDescriptor { Kind = "mock_pishock", Id = "left-thigh" },
+        };
+
+        await using var sys = await Build(
+            items,
+            extraFactories: new IBackendFactory[] { new Smited.Daemon.Pishock.MockPishockBackendFactory() });
+
+        sys.Registry.Count.Should().Be(1);
+        var backend = sys.Registry.TryGet("left-thigh");
+        backend.Should().NotBeNull();
+        backend!.Kind.Should().Be("pishock");
+    }
+
+    [Fact]
+    public async Task Two_mock_pishock_descriptors_both_register_with_distinct_state()
+    {
+        // PiShock is multi-instance by design: each shocker has its own
+        // share code or IP, its own AllowedOps, its own rate limiter.
+        // Two enabled mock_pishock descriptors must produce two distinct
+        // backends — failing this would silently merge them, breaking
+        // the multi-shocker workflow PiShock exists to support.
+        var items = new[]
+        {
+            new BackendDescriptor { Kind = "mock_pishock", Id = "left-thigh" },
+            new BackendDescriptor { Kind = "mock_pishock", Id = "right-calf" },
+        };
+
+        await using var sys = await Build(
+            items,
+            extraFactories: new IBackendFactory[] { new Smited.Daemon.Pishock.MockPishockBackendFactory() });
+
+        sys.Registry.Count.Should().Be(2);
+        sys.Registry.TryGet("left-thigh").Should().NotBeNull();
+        sys.Registry.TryGet("right-calf").Should().NotBeNull();
+        sys.Registry.TryGet("left-thigh").Should().NotBeSameAs(sys.Registry.TryGet("right-calf"));
+    }
+
     private static async Task<TestSystem> Build(
         IReadOnlyList<BackendDescriptor> items,
         IEnumerable<IBackendFactory>? extraFactories = null)
