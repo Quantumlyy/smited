@@ -31,9 +31,24 @@ public sealed class BhapticsBackendOptions
 
     /// <summary>
     /// Reconnect attempts on Player disconnect. Default 3 attempts
-    /// with exponential backoff. After the limit, the backend's
-    /// <c>Status</c> transitions to <c>BACKEND_STATUS_ERROR</c> and a
-    /// <c>BackendLifecycleEvent</c> is emitted.
+    /// with exponential backoff (1s, 2s, 4s, ...). After the limit,
+    /// the backend's <c>Status</c> transitions to
+    /// <c>BACKEND_STATUS_ERROR</c> and a <c>BackendLifecycleEvent</c>
+    /// is emitted. Set to <c>0</c> to skip reconnect entirely — the
+    /// backend will go straight from <c>DISCONNECTED</c> to
+    /// <c>ERROR</c> on the first drop.
     /// </summary>
     public int MaxReconnectAttempts { get; set; } = 3;
+
+    /// <summary>
+    /// How long <c>ConnectAsync</c> waits after the WebSocket handshake
+    /// completes for the Player to push its first <c>deviceStatus</c>
+    /// frame. The frame populates the live accessory set so
+    /// <c>SensationLoader</c> validates persisted accessory-targeting
+    /// sensations against the expanded topology rather than the
+    /// vest-only default. Default 1500ms — enough for a healthy local
+    /// Player, short enough that a slow or absent Player doesn't block
+    /// daemon boot indefinitely. Set to <c>0</c> to skip the wait.
+    /// </summary>
+    public int InitialStatusTimeoutMillis { get; set; } = 1500;
 }

@@ -42,6 +42,9 @@ public sealed class BhapticsBackend : IHapticBackend
     private BackendStatus _status = BackendStatus.Disconnected;
     private ProtoStruct? _extras;
     private bool _accessoriesAdvertised;
+    private TaskCompletionSource<bool>? _initialStatusReceived;
+    private CancellationTokenSource? _reconnectCts;
+    private volatile bool _disposed;
 
     public BhapticsBackend(
         BhapticsBackendOptions options,
@@ -97,12 +100,57 @@ public sealed class BhapticsBackend : IHapticBackend
 
     public async Task ConnectAsync(CancellationToken ct)
     {
-        var endpoint = new Uri(_options.PlayerEndpoint);
-        _client = new PlayerClient(endpoint, _log);
-        _client.DeviceStatusChanged += OnDeviceStatusChanged;
-        _client.Disconnected += OnDisconnected;
+        await OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        await _client.ConnectAsync(ct).ConfigureAwait(false);
+        // Wait briefly for the Player to push its first deviceStatus
+        // frame so any paired accessories are reflected in the topology
+        // before SensationLoader validates persisted sensations against
+        // it. Without this, an arm_l_*-targeting sensation persisted
+        // from a previous run could fail boot validation against the
+        // vest-only initial topology — even when the user's hardware
+        // is actually attached. The wait is bounded:
+        // InitialStatusTimeoutMillis defaults to 1500ms, more than
+        // enough for a healthy local Player but short enough that a
+        // missing or slow Player doesn't block daemon startup forever.
+        var initialStatus = _initialStatusReceived;
+        var timeout = TimeSpan.FromMilliseconds(_options.InitialStatusTimeoutMillis);
+        if (timeout > TimeSpan.Zero && initialStatus is not null)
+        {
+            var winner = await Task.WhenAny(initialStatus.Task, Task.Delay(timeout, ct)).ConfigureAwait(false);
+            if (winner != initialStatus.Task)
+            {
+                _log.LogDebug(
+                    "bHaptics Player did not push deviceStatus within {Timeout}; proceeding with vest-only topology",
+                    timeout);
+            }
+        }
+    }
+
+    private async Task OpenConnectionAsync(CancellationToken ct)
+    {
+        // Tear down any prior client (the reconnect path calls this on
+        // a stale instance whose read loop has already terminated).
+        // Clear the field BEFORE disposing so that if the new
+        // connection attempt fails, BhapticsBackend.DisposeAsync
+        // doesn't try to dispose the same client a second time.
+        var existing = _client;
+        _client = null;
+        if (existing is not null)
+        {
+            existing.DeviceStatusChanged -= OnDeviceStatusChanged;
+            existing.Disconnected -= OnDisconnected;
+            await existing.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _initialStatusReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var endpoint = new Uri(_options.PlayerEndpoint);
+        var client = new PlayerClient(endpoint, _log);
+        client.DeviceStatusChanged += OnDeviceStatusChanged;
+        client.Disconnected += OnDisconnected;
+
+        await client.ConnectAsync(ct).ConfigureAwait(false);
+        _client = client;
         _status = BackendStatus.Ready;
     }
 
@@ -274,6 +322,11 @@ public sealed class BhapticsBackend : IHapticBackend
     {
         _extras = BuildExtras(devices);
 
+        // The first deviceStatus arriving after a fresh connection
+        // unblocks ConnectAsync's bounded wait so callers see the
+        // populated accessory set before Resume.
+        _initialStatusReceived?.TrySetResult(true);
+
         // bHaptics Player pushes a deviceStatus frame whenever paired
         // hardware changes (and as a periodic heartbeat). Reconcile our
         // advertised topology with what the Player reports: if any
@@ -300,6 +353,21 @@ public sealed class BhapticsBackend : IHapticBackend
 
     private void OnDisconnected(Exception? terminal)
     {
+        if (_disposed) return;
+
+        // Cancel every in-flight playback. Without this, a single-
+        // microsensation sensation in its Task.Delay would just wait
+        // out the duration on a closed socket and emit
+        // SensationCompleted as if it had played, even though no
+        // frame actually reached the suit. Cancelling the linked CTS
+        // routes the playback through the OperationCanceledException
+        // branch, which emits SensationCancelled with reason
+        // "preempted_or_stopped".
+        foreach (var p in _playbacks.Values)
+        {
+            SafeCancel(p.Cts);
+        }
+
         _status = BackendStatus.Disconnected;
         EmitEvent(new BackendLifecycleEvent(
             Id,
@@ -307,6 +375,80 @@ public sealed class BhapticsBackend : IHapticBackend
             BackendLifecycleChange.StatusChanged,
             BackendSummarySnapshot.Of(this),
             Reason: terminal?.GetType().Name ?? "peer_close"));
+
+        if (_options.MaxReconnectAttempts <= 0)
+        {
+            _status = BackendStatus.Error;
+            EmitEvent(new BackendLifecycleEvent(
+                Id,
+                _time.GetUtcNow(),
+                BackendLifecycleChange.StatusChanged,
+                BackendSummarySnapshot.Of(this),
+                Reason: "reconnect_disabled"));
+            return;
+        }
+
+        // Cancel any prior reconnect loop and start a fresh one. Two
+        // OnDisconnected calls in flight (e.g. flap during reconnect)
+        // collapse to one active loop via the atomic swap.
+        var newCts = new CancellationTokenSource();
+        var oldCts = Interlocked.Exchange(ref _reconnectCts, newCts);
+        oldCts?.Cancel();
+        oldCts?.Dispose();
+        _ = Task.Run(() => ReconnectLoopAsync(newCts.Token));
+    }
+
+    private async Task ReconnectLoopAsync(CancellationToken ct)
+    {
+        for (var attempt = 1; attempt <= _options.MaxReconnectAttempts; attempt++)
+        {
+            // Exponential backoff: 1s, 2s, 4s, ...  Capped implicitly
+            // by MaxReconnectAttempts; a 4-attempt run waits at most
+            // 1+2+4+8 = 15s before giving up.
+            var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
+            try
+            {
+                await Task.Delay(delay, _time, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            try
+            {
+                await OpenConnectionAsync(ct).ConfigureAwait(false);
+                _log.LogInformation(
+                    "Reconnected to bHaptics Player on attempt {Attempt}/{Max}",
+                    attempt, _options.MaxReconnectAttempts);
+                EmitEvent(new BackendLifecycleEvent(
+                    Id,
+                    _time.GetUtcNow(),
+                    BackendLifecycleChange.StatusChanged,
+                    BackendSummarySnapshot.Of(this),
+                    Reason: "reconnected"));
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "Reconnect attempt {Attempt}/{Max} to bHaptics Player at {Endpoint} failed",
+                    attempt, _options.MaxReconnectAttempts, _options.PlayerEndpoint);
+            }
+        }
+
+        if (ct.IsCancellationRequested) return;
+        _status = BackendStatus.Error;
+        EmitEvent(new BackendLifecycleEvent(
+            Id,
+            _time.GetUtcNow(),
+            BackendLifecycleChange.StatusChanged,
+            BackendSummarySnapshot.Of(this),
+            Reason: "reconnect_exhausted"));
     }
 
     private static ProtoStruct BuildExtras(IReadOnlyList<DeviceStatus> devices)
@@ -329,6 +471,12 @@ public sealed class BhapticsBackend : IHapticBackend
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
+
+        var reconnectCts = Interlocked.Exchange(ref _reconnectCts, null);
+        reconnectCts?.Cancel();
+        reconnectCts?.Dispose();
+
         foreach (var p in _playbacks.Values)
         {
             SafeCancel(p.Cts);

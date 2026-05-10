@@ -200,14 +200,127 @@ public class BhapticsBackendTests
 
         await sim.CloseAsync();
 
-        // Wait for OnDisconnected to flip _status before retrying the trigger.
-        var lifecycle = await NextWithin(enumerator, TimeSpan.FromSeconds(2));
-        lifecycle.Should().BeOfType<BackendLifecycleEvent>()
+        // The fixture configures MaxReconnectAttempts=0 (see NewBackend),
+        // so OnDisconnected flips status DISCONNECTED → ERROR
+        // immediately and emits two lifecycle events back-to-back.
+        // Drain the first; its snapshot is the transient DISCONNECTED.
+        var first = await NextWithin(enumerator, TimeSpan.FromSeconds(2));
+        first.Should().BeOfType<BackendLifecycleEvent>()
             .Which.Snapshot.Status.Should().Be(BackendStatus.Disconnected);
 
+        var second = await NextWithin(enumerator, TimeSpan.FromSeconds(2));
+        second.Should().BeOfType<BackendLifecycleEvent>()
+            .Which.Snapshot.Status.Should().Be(BackendStatus.Error);
+
         var act = () => backend.TriggerAsync(MakeRequest(new[] { "front_chest" }, 50, 200), CancellationToken.None);
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .Where(ex => ex.Message.Contains("Disconnected"));
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Active_playback_is_cancelled_when_Player_disconnects()
+    {
+        await using var sim = await BhapticsPlayerSimulator.StartAsync();
+        await using var backend = NewBackend(sim.Endpoint);
+        await backend.ConnectAsync(CancellationToken.None);
+
+        var request = MakeRequest(new[] { "front_chest" }, intensity: 60, durationMs: 5000);
+        await backend.TriggerAsync(request, CancellationToken.None);
+
+        var enumerator = backend.Events.GetAsyncEnumerator();
+        var started = await NextWithin(enumerator, TimeSpan.FromSeconds(2));
+        started.Should().BeOfType<SensationStarted>();
+
+        // Disconnect mid-playback (the 5-second Task.Delay would
+        // otherwise time out and emit SensationCompleted as if the
+        // suit had played).
+        await sim.CloseAsync();
+
+        // Drain lifecycle events until we land on either SensationCancelled
+        // (the playback we care about) or the stream stops producing — the
+        // disconnect bookkeeping emits BackendLifecycleEvents in between.
+        BackendEvent? terminal = null;
+        for (var i = 0; i < 5 && terminal is null; i++)
+        {
+            var evt = await NextWithin(enumerator, TimeSpan.FromSeconds(2));
+            if (evt is SensationCancelled or SensationCompleted)
+            {
+                terminal = evt;
+            }
+        }
+
+        terminal.Should().BeOfType<SensationCancelled>(
+            "an in-flight playback must not falsely complete after the socket closes");
+    }
+
+    [Fact]
+    public async Task Reconnect_loop_transitions_to_Error_after_MaxReconnectAttempts_exhausted()
+    {
+        // Real TimeProvider: FakeTimeProvider doesn't compose with the
+        // sequential per-attempt Task.Delay in ReconnectLoopAsync — each
+        // scheduled delay is relative to the clock when scheduled, so
+        // a single Advance only fires the first attempt's delay. Two
+        // attempts at 1s+2s backoff = ~3s total wall time, fast enough
+        // for a unit test.
+        await using var sim = await BhapticsPlayerSimulator.StartAsync();
+        var options = new BhapticsBackendOptions
+        {
+            BackendId = "bhaptics-test",
+            PlayerEndpoint = sim.Endpoint.ToString(),
+            MaxReconnectAttempts = 2,
+            InitialStatusTimeoutMillis = 0,
+        };
+        await using var backend = new BhapticsBackend(options, NullLogger<BhapticsBackend>.Instance, TimeProvider.System);
+        await backend.ConnectAsync(CancellationToken.None);
+
+        var enumerator = backend.Events.GetAsyncEnumerator();
+
+        await sim.CloseAsync();
+        await sim.DisposeAsync();
+
+        // First lifecycle event after disconnect: status DISCONNECTED.
+        var disconnected = await NextWithin(enumerator, TimeSpan.FromSeconds(5));
+        disconnected.Should().BeOfType<BackendLifecycleEvent>()
+            .Which.Snapshot.Status.Should().Be(BackendStatus.Disconnected);
+
+        // Eventual lifecycle event: status ERROR with reason
+        // "reconnect_exhausted" once both attempts have failed. Allow
+        // ~10s wall-clock to account for backoff (1s+2s) plus connect
+        // attempt overhead.
+        BackendLifecycleEvent? errorEvent = null;
+        for (var i = 0; i < 10 && errorEvent is null; i++)
+        {
+            var evt = await NextWithin(enumerator, TimeSpan.FromSeconds(10));
+            if (evt is BackendLifecycleEvent ble && ble.Snapshot.Status == BackendStatus.Error)
+            {
+                errorEvent = ble;
+            }
+        }
+
+        errorEvent.Should().NotBeNull();
+        errorEvent!.Reason.Should().Be("reconnect_exhausted");
+        backend.Status.Should().Be(BackendStatus.Error);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_waits_for_initial_deviceStatus_so_accessories_are_reflected()
+    {
+        await using var sim = await BhapticsPlayerSimulator.StartAsync(
+            initialDeviceStatus: new[]
+            {
+                new DeviceStatus { Position = Position.Vest, Connected = true, BatteryPercent = 80 },
+                new DeviceStatus { Position = Position.ForearmL, Connected = true, BatteryPercent = 75 },
+            });
+
+        await using var backend = NewBackend(sim.Endpoint);
+        await backend.ConnectAsync(CancellationToken.None);
+
+        // The auto-pushed deviceStatus reaches the read loop while
+        // ConnectAsync is still inside its bounded wait, so by the time
+        // ConnectAsync returns the topology already includes the
+        // sleeve zones — this is the property SensationLoader needs at
+        // boot.
+        backend.Zones.Zones.Should().HaveCount(60);
+        backend.Zones.Zones.Select(z => z.Id).Should().Contain("arm_l_0");
     }
 
     private static BackendTriggerRequest MakeRequest(IReadOnlyList<string> zoneIds, int intensity, int durationMs)

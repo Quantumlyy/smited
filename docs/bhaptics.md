@@ -29,7 +29,8 @@ Configuration knobs (under `Smited:Bhaptics`):
 |---|---|---|
 | `BackendId` | `bhaptics-primary` | Identity advertised to gRPC clients. Override only when running multiple bHaptics backends against distinct devices on a single host (rare). |
 | `PlayerEndpoint` | `ws://localhost:15881/v2/feedbacks` | Override only if the Player's port has been customised. |
-| `MaxReconnectAttempts` | `3` | Reconnect attempts on Player disconnect, with exponential backoff. After the limit the backend transitions to `BACKEND_STATUS_ERROR` and emits a lifecycle event. |
+| `MaxReconnectAttempts` | `3` | Reconnect attempts on Player disconnect, with exponential backoff (1s, 2s, 4s, ...). On success, status returns to `READY` and a `StatusChanged` lifecycle event with reason `reconnected` is emitted. After the limit the backend transitions to `BACKEND_STATUS_ERROR` with reason `reconnect_exhausted`. Set to `0` to skip reconnect entirely (immediate `ERROR` on disconnect). |
+| `InitialStatusTimeoutMillis` | `1500` | How long `ConnectAsync` waits after the WebSocket handshake for the Player's first `deviceStatus` frame so any paired accessories are reflected in the topology before `SensationLoader` runs. Set to `0` to skip the wait — useful when the daemon owns the Player startup ordering. |
 
 ## Sensation authoring
 
@@ -37,7 +38,7 @@ bHaptics sensations live under `sensations/bhaptics_tactsuit/*.json` with `backe
 
 Zone groups available out of the box: `front`, `back`, `front_chest` (front 0..7), `back_shoulders` (back 0..3), `torso` (front + back), `all` (every registered motor — grows when accessories are paired). When accessories are reported by the Player, additional `gloves` and `arms` groups appear.
 
-Required parameters per microsensation: `intensity` (0..100, %) and `duration` (0..10s). Optional `frequency` (50..200 Hz) targets TactSuit X-series motors only; older devices ignore it but the schema honours it.
+Required parameters per microsensation: `intensity` (0..100, %) and `duration` (0..10s). The Player's `dotMode` wire format carries only `(index, intensity)` per motor — there's nowhere on the wire for a frequency or other parameter, so the backend's schema is intentionally minimal. Frequency tuning, when supported by the device, is a Player-app concern.
 
 See [`sensations/README.md`](../sensations/README.md) for the full file format reference and `Per-backend authoring notes` for how bHaptics interprets these parameters versus OWO.
 
@@ -47,7 +48,7 @@ The backend starts with the 40-zone vest topology. When the Player reports a pai
 
 Because sample sensations ship with `default_zone_ids` validated at boot against the *current* topology, files targeting accessory zones aren't included in `sensations/bhaptics_tactsuit/` by default — they'd abort startup on hosts without the accessory paired. Two ways to author sleeve/glove-targeting sensations:
 
-1. Pair the accessory before authoring the file, then drop it in `sensations/bhaptics_tactsuit/<name>.json` and restart the daemon. The boot-time validator binds against the expanded topology.
+1. Pair the accessory before authoring the file, then drop it in `sensations/bhaptics_tactsuit/<name>.json` and restart the daemon. `ConnectAsync` waits up to `InitialStatusTimeoutMillis` (default 1500ms) for the Player to push its first `deviceStatus` frame, so the topology reflects paired accessories before `SensationLoader` validates persisted files against it. If your Player is slow to push that frame, raise the timeout.
 2. Use the `RegisterSensation` gRPC at runtime once the accessory is connected — `DescribeBackend` reports the expanded zones, `RegisterSensation` validates against the same, and the daemon persists the file with `scope: "id"` so it survives a restart for that backend instance only.
 
 Face and shoes accessories are intentionally out of scope for v0.1.x; the topology and `ZoneIndexMap` would need extension to support them.

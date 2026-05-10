@@ -36,7 +36,7 @@ public class BhapticsCapabilityTests
         response.Zones.Groups.Select(g => g.Id).Should().BeEquivalentTo(
             "front", "back", "front_chest", "back_shoulders", "torso", "all");
         response.Parameters.Parameters.Select(p => p.Name).Should().BeEquivalentTo(
-            "intensity", "duration", "frequency");
+            "intensity", "duration");
         response.Concurrency.MaxConcurrent.Should().Be(4u);
         response.Concurrency.Policy.Should().Be(ConcurrencyPolicy.Priority);
         // bHaptics has no per-user calibration; the optional field is left

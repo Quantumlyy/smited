@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Smited.Daemon.Bhaptics.WebSocket;
 
 namespace Smited.Daemon.Tests.Bhaptics.Fixtures;
 
@@ -50,8 +51,15 @@ internal sealed class BhapticsPlayerSimulator : IAsyncDisposable
     /// <summary>
     /// Boot a simulator on an auto-assigned port. Returns once the
     /// server is listening; the connect handshake hasn't happened yet.
+    /// When <paramref name="initialDeviceStatus"/> is non-null, the
+    /// simulator sends a <c>deviceStatus</c> frame with that payload
+    /// immediately after accepting each WebSocket — this mirrors what
+    /// the real bHaptics Player does on connect, and lets tests verify
+    /// the backend's <c>InitialStatusTimeoutMillis</c> wait reaches the
+    /// expanded topology before <c>ConnectAsync</c> returns.
     /// </summary>
-    public static async Task<BhapticsPlayerSimulator> StartAsync()
+    public static async Task<BhapticsPlayerSimulator> StartAsync(
+        IReadOnlyList<DeviceStatus>? initialDeviceStatus = null)
     {
         var received = Channel.CreateUnbounded<JsonElement>();
         var connectedSocket = new TaskCompletionSource<WebSocket>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -73,6 +81,23 @@ internal sealed class BhapticsPlayerSimulator : IAsyncDisposable
 
             var ws = await ctx.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
             connectedSocket.TrySetResult(ws);
+
+            if (initialDeviceStatus is { Count: > 0 })
+            {
+                var frame = new
+                {
+                    type = "deviceStatus",
+                    devices = initialDeviceStatus.Select(d => new
+                    {
+                        position = (int)d.Position,
+                        connected = d.Connected,
+                        batteryPercent = d.BatteryPercent,
+                    }).ToArray(),
+                };
+                var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+                await ws.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, shutdown.Token).ConfigureAwait(false);
+            }
+
             await ReadLoopAsync(ws, received.Writer, shutdown.Token).ConfigureAwait(false);
         });
 
@@ -100,12 +125,22 @@ internal sealed class BhapticsPlayerSimulator : IAsyncDisposable
 
     /// <summary>
     /// Close the active socket from the simulator side. The client
-    /// observes this as a peer-initiated close.
+    /// observes this as a peer-initiated close. Best-effort: tests
+    /// only care that the connection ends, so a racy close-handshake
+    /// failure is swallowed (the peer may have closed first or the
+    /// Kestrel request stream may be disposed mid-handshake during
+    /// concurrent backend tear-down).
     /// </summary>
     public async Task CloseAsync(CancellationToken ct = default)
     {
         var ws = await WaitForConnectionAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
-        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "simulator-close", ct).ConfigureAwait(false);
+        try
+        {
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "simulator-close", ct).ConfigureAwait(false);
+        }
+        catch (WebSocketException) { /* peer already closed or handshake raced */ }
+        catch (ObjectDisposedException) { /* underlying stream torn down */ }
+        catch (System.IO.IOException) { /* request body stream gone */ }
     }
 
     private async Task<WebSocket> WaitForConnectionAsync(TimeSpan timeout, CancellationToken ct)
@@ -152,15 +187,19 @@ internal sealed class BhapticsPlayerSimulator : IAsyncDisposable
         catch (WebSocketException) { /* peer dropped */ }
     }
 
+    private int _disposed;
+
     public async ValueTask DisposeAsync()
     {
-        _shutdown.Cancel();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        try { _shutdown.Cancel(); } catch (ObjectDisposedException) { }
         _received.Writer.TryComplete();
         try
         {
             await _app.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception) { /* tear-down best-effort */ }
-        _shutdown.Dispose();
+        try { _shutdown.Dispose(); } catch (ObjectDisposedException) { }
     }
 }

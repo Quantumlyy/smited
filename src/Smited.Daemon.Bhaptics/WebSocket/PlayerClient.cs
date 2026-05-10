@@ -259,9 +259,13 @@ internal sealed class PlayerClient : IAsyncDisposable
         }
     }
 
+    private int _disposed;
+
     public async ValueTask DisposeAsync()
     {
-        _readLoopCts?.Cancel();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        try { _readLoopCts?.Cancel(); } catch (ObjectDisposedException) { }
         var ws = _ws;
         if (ws is not null)
         {
@@ -285,7 +289,7 @@ internal sealed class PlayerClient : IAsyncDisposable
             catch (Exception) { /* tear-down best-effort */ }
         }
 
-        _readLoopCts?.Dispose();
-        _sendLock.Dispose();
+        try { _readLoopCts?.Dispose(); } catch (ObjectDisposedException) { }
+        try { _sendLock.Dispose(); } catch (ObjectDisposedException) { }
     }
 }

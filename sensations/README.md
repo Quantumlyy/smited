@@ -94,5 +94,5 @@ The two shipping backends interpret parameters differently. Author files in `sen
 
 - Vibration motors. `intensity` (0–100) maps directly to per-motor PWM, modulated by the bHaptics Player app's global slider — there's no per-user calibration step. Motors physically sum on the device, so concurrent sensations can stack.
 - Concurrency is `CONCURRENCY_POLICY_PRIORITY` with `max_concurrent = 4`. Higher-priority triggers preempt lower-priority ones; equal-priority within capacity stack normally.
-- Required parameters per microsensation: `intensity` (%), `duration`. Optional `frequency` (50–200 Hz) targets TactSuit X-series motors only — older devices ignore it but the schema honours it.
+- Required parameters per microsensation: `intensity` (%) and `duration`. The Player's `dotMode` wire protocol carries only `(motor_index, intensity)`, so no other parameters are accepted.
 - Zone groups follow the canonical bHaptics layout: `front` and `back` cover the 20 motors of each vest half; `front_chest` and `back_shoulders` are the top rows; `torso` is both halves; `all` is every registered motor (and grows when accessories are attached). Front and back zones use distinct `Frame` labels (`body_front` / `body_back`) so cross-backend clients can tell which side of the body they target.

@@ -117,11 +117,19 @@ public static class BhapticsTopology
     }
 
     /// <summary>
-    /// Build the parameter schema for bHaptics. Three parameters:
-    /// <c>intensity</c> (0..100, %), <c>duration</c> (0..10s — matches
-    /// bHaptics Player's per-effect cap), and an optional <c>frequency</c>
-    /// (50..200 Hz, X-series only — older devices ignore it but the
-    /// schema honours it).
+    /// Build the parameter schema for bHaptics. Two parameters:
+    /// <c>intensity</c> (0..100, %) and <c>duration</c> (0..10s — matches
+    /// bHaptics Player's per-effect cap).
+    ///
+    /// <para>
+    /// A per-motor frequency parameter was considered but isn't exposed:
+    /// the Player's WebSocket v2 <c>dotMode</c> protocol carries only
+    /// <c>(index, intensity)</c> per motor. There's nowhere on the wire
+    /// to put a frequency value, so accepting one would mean accepting
+    /// it and silently dropping it — worse than not advertising it. If
+    /// a future Player protocol exposes per-dot frequency, add it here
+    /// alongside the WebSocket DTO updates.
+    /// </para>
     /// </summary>
     public static ParameterSchema BuildParameters()
     {
@@ -144,16 +152,6 @@ public static class BhapticsTopology
             Min = 0,
             Max = 10,
             Description = "Active vibration length. 10s ceiling matches bHaptics Player's per-effect cap.",
-        });
-        s.Parameters.Add(new ParameterDef
-        {
-            Name = "frequency",
-            Type = ParameterType.Number,
-            Required = false,
-            Min = 50,
-            Max = 200,
-            Unit = "Hz",
-            Description = "Optional motor frequency. TactSuit X-series only; older devices ignore it.",
         });
         return s;
     }

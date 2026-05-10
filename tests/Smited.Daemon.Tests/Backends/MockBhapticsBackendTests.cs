@@ -75,12 +75,12 @@ public class MockBhapticsBackendTests
     }
 
     [Fact]
-    public void Parameter_schema_has_three_params_with_correct_ranges()
+    public void Parameter_schema_has_two_params_with_correct_ranges()
     {
         var backend = NewBackend(out _);
 
         var byName = backend.Parameters.Parameters.ToDictionary(p => p.Name);
-        byName.Should().HaveCount(3);
+        byName.Should().HaveCount(2);
 
         byName["intensity"].Type.Should().Be(ParameterType.Number);
         byName["intensity"].Required.Should().BeTrue();
@@ -92,12 +92,6 @@ public class MockBhapticsBackendTests
         byName["duration"].Required.Should().BeTrue();
         byName["duration"].Min.Should().Be(0);
         byName["duration"].Max.Should().Be(10);
-
-        byName["frequency"].Type.Should().Be(ParameterType.Number);
-        byName["frequency"].Required.Should().BeFalse();
-        byName["frequency"].Min.Should().Be(50);
-        byName["frequency"].Max.Should().Be(200);
-        byName["frequency"].Unit.Should().Be("Hz");
     }
 
     [Fact]
