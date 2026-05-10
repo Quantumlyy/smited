@@ -356,6 +356,40 @@ public class OwoBackendTests
     }
 
     [Fact]
+    public async Task StopAsync_then_TriggerAsync_does_not_silence_the_replacement_via_lingering_old_catch()
+    {
+        // Regression for the CANCEL_OLDEST race: the coordinator's
+        // preempt path is StopAsync(old) followed by TriggerAsync(new).
+        // OWO.Stop() is global; if the OLD playback task's OCE catch
+        // fires AFTER the NEW playback's first Send, the catch's own
+        // _sdk.Stop() silences the replacement.
+        var backend = await NewReadyBackend();
+        await using var ____ = backend.B;
+
+        await backend.B.TriggerAsync(MakeRequest("old", TimeSpan.FromSeconds(5)), CancellationToken.None);
+        await Task.Delay(50); // Let the dispatch loop fire old's first Send.
+
+        backend.Sdk.Received(1).Send(Arg.Any<OwoSendCommand>());
+        backend.Sdk.DidNotReceive().Stop();
+
+        // Coordinator preempt: stop the old, immediately trigger the new.
+        var stopped = await backend.B.StopAsync(
+            new BackendStopRequest("old", All: false), CancellationToken.None);
+        stopped.Should().Be(1);
+        backend.Sdk.Received(1).Stop();
+
+        await backend.B.TriggerAsync(MakeRequest("new", TimeSpan.FromSeconds(5)), CancellationToken.None);
+        await Task.Delay(100); // Let new's Send dispatch AND old's catch run.
+
+        // The new sensation must have been Send'd…
+        backend.Sdk.Received(2).Send(Arg.Any<OwoSendCommand>());
+        // …and Stop must NOT have been called a second time. If it had,
+        // the old playback's OCE catch fired after new's Send and
+        // silenced the device.
+        backend.Sdk.Received(1).Stop();
+    }
+
+    [Fact]
     public async Task TriggerAsync_cancellation_after_first_Send_calls_sdk_Stop()
     {
         // If cancellation arrives after a microsensation has already been

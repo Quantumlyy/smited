@@ -355,7 +355,8 @@ public sealed class OwoBackend : IHapticBackend
         // enforcement, but we still key by id for symmetry with the
         // mock backend.
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _activeSensations[request.SensationId] = new ActivePlayback(linked, completion.Task);
+        var playback = new ActivePlayback(linked, completion.Task);
+        _activeSensations[request.SensationId] = playback;
 
         EmitEvent(new SensationStarted(
             Id,
@@ -428,7 +429,17 @@ public sealed class OwoBackend : IHapticBackend
             }
             catch (OperationCanceledException)
             {
-                if (anySent)
+                // Only call _sdk.Stop() if we sent something AND nobody
+                // else has already issued a Stop on our behalf. The
+                // SkipSdkStop flag (set by StopAsync/DisposeAsync)
+                // prevents CANCEL_OLDEST preemption from silencing the
+                // replacement sensation: the coordinator's flow there is
+                // StopAsync(old) — which calls _sdk.Stop() — followed by
+                // TriggerAsync(new) — which calls _sdk.Send(). If we
+                // also called Stop here, after the new Send had already
+                // fired, we'd silence the device the user is now
+                // expecting to feel.
+                if (anySent && !playback.SkipSdkStop)
                 {
                     try
                     {
@@ -454,7 +465,7 @@ public sealed class OwoBackend : IHapticBackend
                 _logger.LogWarning(ex,
                     "OWO sensation {SensationId} failed mid-flight",
                     request.SensationId);
-                if (anySent)
+                if (anySent && !playback.SkipSdkStop)
                 {
                     try { _sdk.Stop(); }
                     catch { /* swallow — already in an error path */ }
@@ -507,6 +518,13 @@ public sealed class OwoBackend : IHapticBackend
             {
                 if (_activeSensations.TryRemove(id, out var removed))
                 {
+                    // Tell the playback's catch block we own the SDK
+                    // stop here, before cancelling its token. Otherwise
+                    // its OCE catch may run later — possibly after a
+                    // replacement sensation has already been Send()'d —
+                    // and silence the new playback via OWO's global
+                    // Stop semantics.
+                    removed.MarkStopHandledExternally();
                     SafeCancel(removed.Cts);
                     stopped++;
                 }
@@ -515,6 +533,7 @@ public sealed class OwoBackend : IHapticBackend
         else if (!string.IsNullOrEmpty(request.SensationId)
             && _activeSensations.TryRemove(request.SensationId, out var playback))
         {
+            playback.MarkStopHandledExternally();
             SafeCancel(playback.Cts);
             stopped = 1;
         }
@@ -572,10 +591,15 @@ public sealed class OwoBackend : IHapticBackend
         // each one's completion signal. Each playback's TCS is resolved
         // only after its SensationCancelled event is written to
         // _events — awaiting here ensures those events make the channel
-        // before TryComplete shuts the writer below.
+        // before TryComplete shuts the writer below. We also mark each
+        // playback so its OCE catch skips _sdk.Stop() — DisposeAsync
+        // calls _sdk.Stop() itself further down, and unlike StopAsync
+        // there's no replacement sensation to worry about, but the
+        // double-Stop is still pointless noise.
         var snapshot = _activeSensations.Values.ToArray();
         foreach (var playback in snapshot)
         {
+            playback.MarkStopHandledExternally();
             SafeCancel(playback.Cts);
         }
         foreach (var playback in snapshot)
@@ -853,6 +877,36 @@ public sealed class OwoBackend : IHapticBackend
     /// written to the event channel. <see cref="DisposeAsync"/> awaits
     /// these so shutdown doesn't drop end-of-life events.
     /// </summary>
-    private sealed record ActivePlayback(CancellationTokenSource Cts, Task Task);
+    /// <remarks>
+    /// <see cref="SkipSdkStop"/> is the load-bearing piece that prevents
+    /// CANCEL_OLDEST preemption from silencing its own replacement.
+    /// <c>OWO.Stop()</c> is global — it cancels whatever sensation is
+    /// playing right now, regardless of which logical sensation owned
+    /// it. When <see cref="StopAsync"/> or <see cref="DisposeAsync"/>
+    /// handles the SDK stop itself, they flip this flag so the playback
+    /// task's <c>OperationCanceledException</c> catch (which observes
+    /// the cancelled token only after the thread pool gets to it, and
+    /// possibly after the coordinator has already issued a replacement
+    /// <c>_sdk.Send</c>) doesn't double up and stop the new sensation.
+    /// Cancellations that don't go through StopAsync/DisposeAsync —
+    /// e.g. the caller's gRPC token aborting mid-playback — leave this
+    /// flag false so the catch still silences the device.
+    /// </remarks>
+    private sealed class ActivePlayback
+    {
+        public ActivePlayback(CancellationTokenSource cts, Task task)
+        {
+            Cts = cts;
+            Task = task;
+        }
+
+        public CancellationTokenSource Cts { get; }
+
+        public Task Task { get; }
+
+        public bool SkipSdkStop { get; private set; }
+
+        public void MarkStopHandledExternally() => SkipSdkStop = true;
+    }
 }
 #endif
