@@ -16,7 +16,11 @@ using Smited.Daemon.Triggering;
 using Smited.Daemon.Validation;
 using Smited.V1;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 // User config layer: appsettings.json (+ Development overlay) is added by
 // CreateBuilder; layering the per-user config file AFTER means user values
@@ -96,7 +100,7 @@ builder.Services.AddGrpcReflection();
 
 builder.WebHost.ConfigureKestrel(o =>
 {
-    var smited = builder.Configuration.GetSection("Smited").Get<SmitedOptions>()!;
+    var smited = builder.Configuration.GetSection("Smited").Get<SmitedOptions>() ?? new SmitedOptions();
     var bind = IPAddress.Parse(smited.BindAddress);
 
     // gRPC over h2c
