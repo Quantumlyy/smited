@@ -1,3 +1,5 @@
+using Smited.Daemon.Backends;
+
 namespace Smited.Daemon.Configuration;
 
 /// <summary>
@@ -33,6 +35,14 @@ public sealed class SmitedOptions
     public EventBusOptions EventBus { get; set; } = new();
 
     public HistoryOptions History { get; set; } = new();
+
+    /// <summary>
+    /// Runtime configuration for the bHaptics backend. The actual type
+    /// lives in <c>Smited.Daemon.Abstractions</c> so the
+    /// <c>Smited.Daemon.Bhaptics</c> assembly can take it as a
+    /// constructor dependency without depending on the daemon host.
+    /// </summary>
+    public BhapticsBackendOptions Bhaptics { get; set; } = new();
 
     public sealed class BackendsOptions
     {

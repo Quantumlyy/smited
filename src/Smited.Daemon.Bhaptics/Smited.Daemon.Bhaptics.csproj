@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Plain net9.0 (not net9.0-windows like Smited.Daemon.Owo): bHaptics
+      integration uses System.Net.WebSockets.ClientWebSocket from BCL
+      with no Windows-only NuGet packages, so the assembly compiles and
+      links on every platform. The Windows-only property of bHaptics is
+      that bHaptics Player itself only runs on Windows; that's enforced
+      at runtime in BackendBootstrapper via OperatingSystem.IsWindows().
+
+      Cross-platform compilation lets the WebSocket protocol DTOs,
+      PlayerClient, and ZoneIndexMap have meaningful unit-test coverage
+      on Mac CI — only the on-hardware smoke test against a real Player
+      instance is Windows-bound.
+    -->
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Smited.Daemon.Bhaptics</RootNamespace>
+    <AssemblyName>Smited.Daemon.Bhaptics</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    The bHaptics project references the abstractions project (NOT the
+    daemon host) so the build graph stays acyclic. The daemon imports
+    IHapticBackend from the same Abstractions assembly and loads
+    BhapticsBackend via Type.GetType reflection at runtime — symmetric
+    with the OWO pattern even though we don't need a TFM split.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!--
+    Hosting.Abstractions transitively brings the ILogger<T> and IOptions<T>
+    surfaces BhapticsBackend depends on, without pulling the full Hosting
+    runtime (which the daemon host owns).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+  </ItemGroup>
+
+</Project>

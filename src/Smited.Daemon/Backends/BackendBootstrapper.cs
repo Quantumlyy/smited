@@ -94,6 +94,33 @@ internal sealed class BackendBootstrapper : IHostedService
             }
         }
 
+        if (_options.Backends.EnableBhaptics)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                _logger.LogWarning(
+                    "bHaptics backend disabled: EnableBhaptics=true but not running on Windows. " +
+                    "bHaptics Player only runs on Windows.");
+            }
+            else
+            {
+                var bhapticsType = Type.GetType("Smited.Daemon.Bhaptics.BhapticsBackend, Smited.Daemon.Bhaptics");
+                if (bhapticsType is null)
+                {
+                    _logger.LogWarning(
+                        "bHaptics backend disabled: EnableBhaptics=true but the Smited.Daemon.Bhaptics assembly is not in the output directory.");
+                }
+                else
+                {
+                    var bhaptics = (IHapticBackend)ActivatorUtilities.CreateInstance(_services, bhapticsType);
+                    if (await RegisterAndFan(bhaptics, cancellationToken).ConfigureAwait(false))
+                    {
+                        _logger.LogInformation("Registered Windows bHaptics backend {Id}", bhaptics.Id);
+                    }
+                }
+            }
+        }
+
         foreach (var backend in _additionalBackends)
         {
             if (await RegisterAndFan(backend, cancellationToken).ConfigureAwait(false))

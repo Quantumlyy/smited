@@ -68,6 +68,23 @@
     </ProjectReference>
   </ItemGroup>
 
+  <!--
+    Smited.Daemon.Bhaptics targets net9.0 (no Windows-only build deps,
+    just BCL ClientWebSocket), so the reverse reference is unconditional —
+    the assembly always lands in the daemon's output directory and the
+    BackendBootstrapper decides at runtime whether to load it based on
+    OperatingSystem.IsWindows() AND Smited:Backends:EnableBhaptics. Same
+    reflective-load shape as OWO.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <OutputItemType>Content</OutputItemType>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

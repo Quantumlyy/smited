@@ -50,6 +50,13 @@ builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<Mo
 builder.Services.AddSingleton<MockBhapticsBackend>();
 builder.Services.AddSingleton<IMockBhapticsController>(sp => sp.GetRequiredService<MockBhapticsBackend>());
 
+// Republish the BhapticsBackendOptions slice as a top-level singleton so
+// ActivatorUtilities can hand it to the reflectively-loaded BhapticsBackend
+// constructor — its assembly references Abstractions, not the daemon's
+// Configuration namespace, so it can't take IOptions<SmitedOptions>.
+builder.Services.AddSingleton<Smited.Daemon.Backends.BhapticsBackendOptions>(sp =>
+    sp.GetRequiredService<IOptions<SmitedOptions>>().Value.Bhaptics);
+
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE
 // BackendBootstrapper publishes its initial registration events —
