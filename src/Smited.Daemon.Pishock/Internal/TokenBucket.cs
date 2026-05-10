@@ -42,14 +42,24 @@ internal sealed class TokenBucket
         _lastRefillTimestamp = time.GetTimestamp();
     }
 
-    public bool TryConsume()
+    /// <summary>
+    /// Attempts to consume <paramref name="count"/> tokens atomically:
+    /// either all <paramref name="count"/> tokens are consumed and the
+    /// method returns <c>true</c>, or the bucket is unchanged and the
+    /// method returns <c>false</c>. Used by the PiShock backends to
+    /// pre-allocate one token per microsensation in a multi-pulse
+    /// trigger so partial failure can't leak tokens into the bucket's
+    /// state for the next caller to inherit.
+    /// </summary>
+    public bool TryConsume(int count = 1)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
         lock (_lock)
         {
             Refill();
-            if (_tokens >= 1.0)
+            if (_tokens >= count)
             {
-                _tokens -= 1.0;
+                _tokens -= count;
                 return true;
             }
             return false;

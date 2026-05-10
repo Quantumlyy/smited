@@ -112,20 +112,20 @@ public sealed class MockPishockBackend : IHapticBackend
             PishockTriggerValidator.ValidateMicrosensation(i, request.Microsensations[i], _options);
         }
 
-        // Pre-allocate one bucket token per microsensation. Atomic: if the
-        // sequence can't fit in the current bucket, refund nothing and
-        // reject the whole trigger. Partial fires would silently drop
-        // pulses the user authored.
-        for (var i = 0; i < request.Microsensations.Count; i++)
+        // Pre-allocate one bucket token per microsensation atomically.
+        // If the sequence can't fit in the current bucket, the bucket
+        // is unchanged and the trigger is rejected — partial fires
+        // would silently drop pulses the user authored, and a
+        // non-atomic loop would leak tokens up to the failure point
+        // into a state the next trigger inherits.
+        var needed = request.Microsensations.Count;
+        if (needed > 0 && !_bucket.TryConsume(needed))
         {
-            if (!_bucket.TryConsume())
-            {
-                throw new BackendTriggerRejectedException(
-                    TriggerErrorCode.RateLimited,
-                    $"trigger needs {request.Microsensations.Count} bucket tokens but "
-                    + $"only {i} were available; bump MaxBurst or slow down the trigger rate",
-                    "rate_limit");
-            }
+            throw new BackendTriggerRejectedException(
+                TriggerErrorCode.RateLimited,
+                $"trigger needs {needed} bucket tokens; bump MaxBurst or slow "
+                + "down the trigger rate",
+                "rate_limit");
         }
 
         var estimated = MicrosensationReader.ComputeEstimatedDuration(request, _options.Mode);

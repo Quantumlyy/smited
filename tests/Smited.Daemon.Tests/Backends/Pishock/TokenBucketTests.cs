@@ -69,6 +69,36 @@ public class TokenBucketTests
     }
 
     [Fact]
+    public void TryConsume_with_count_atomic_succeeds_when_enough_tokens()
+    {
+        var time = NewTime();
+        var bucket = new TokenBucket(capacity: 5, refillPerSecond: 1, time);
+
+        bucket.TryConsume(3).Should().BeTrue();
+        // 5 - 3 = 2 remaining.
+        bucket.TryConsume(2).Should().BeTrue();
+        bucket.TryConsume(1).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryConsume_with_count_atomic_does_not_leak_tokens_on_failure()
+    {
+        // The PiShock backend pre-allocates one token per microsensation
+        // before starting a multi-pulse trigger. A non-atomic loop would
+        // consume tokens up to the failure point, leaking them — a
+        // 3-pulse trigger with 2 tokens available would burn 2 tokens
+        // and reject. The next trigger that needed those tokens would
+        // also be rejected even though the bucket should still have 2.
+        var time = NewTime();
+        var bucket = new TokenBucket(capacity: 2, refillPerSecond: 1, time);
+
+        bucket.TryConsume(3).Should().BeFalse();
+
+        // Atomic semantic: failure leaves the bucket exactly as it was.
+        bucket.TryConsume(2).Should().BeTrue();
+    }
+
+    [Fact]
     public void Partial_refill_below_one_token_does_not_grant_a_consume()
     {
         var time = NewTime();
