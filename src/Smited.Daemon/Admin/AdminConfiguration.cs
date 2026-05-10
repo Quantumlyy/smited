@@ -17,7 +17,11 @@ internal static class AdminConfiguration
         services.AddRazorPages();
         services.AddServerSideBlazor();
         services.AddSingleton<PanicCounter>();
-        services.AddScoped<EventStreamSubscriber>();
+        // Transient: each component injects its own EventStreamSubscriber
+        // so each gets its own underlying EventBus.Subscription. Channel
+        // readers are single-consumer; sharing one subscription would
+        // race components against each other for events.
+        services.AddTransient<EventStreamSubscriber>();
         services.AddScoped<HistoryQueryService>();
         return services;
     }

@@ -5,11 +5,22 @@ using Smited.Daemon.Events;
 namespace Smited.Daemon.Admin.Services;
 
 /// <summary>
-/// Per-Blazor-circuit subscription to the daemon <see cref="EventBus"/>.
-/// Each component that wants live updates injects this and calls
-/// <see cref="StreamAsync"/> inside a background task. Disposing the
-/// subscriber cancels the stream and releases the underlying subscription.
+/// Per-component-instance wrapper around an <see cref="EventBus"/>
+/// subscription. Registered as <c>Transient</c> so each Blazor
+/// component that injects it gets its own underlying
+/// <see cref="EventBus.Subscription"/>.
 /// </summary>
+/// <remarks>
+/// Channel readers are single-consumer; if multiple components shared
+/// one subscription (i.e. <c>AddScoped</c>), each event would be
+/// delivered to whichever component's <c>await foreach</c> won the read
+/// race, and the others would miss it. Transient lifecycle avoids this
+/// by giving each consumer their own subscription on the bus.
+///
+/// Components must dispose this subscriber (typically via
+/// <c>IAsyncDisposable</c> on the component) to release the underlying
+/// <see cref="EventBus.Subscription"/>.
+/// </remarks>
 internal sealed class EventStreamSubscriber : IAsyncDisposable
 {
     private readonly EventBus _bus;
