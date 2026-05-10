@@ -1,7 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <!--
+      Target net9.0-windows on Windows so the project can take a
+      ProjectReference to the Windows-only Smited.Daemon.Owo (which
+      itself targets net9.0-windows) without NU1201. On Mac/Linux we
+      stay on plain net9.0; OWO-specific test files are excluded
+      below so the smaller TFM is enough.
+    -->
+    <TargetFramework Condition="'$(OS)' == 'Windows_NT'">net9.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(OS)' != 'Windows_NT'">net9.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

@@ -65,6 +65,15 @@
       <OutputItemType>Content</OutputItemType>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <PrivateAssets>all</PrivateAssets>
+      <!--
+        SkipGetTargetFrameworkProperties=true bypasses the TFM
+        compatibility check between net9.0 (this project) and
+        net9.0-windows (the OWO project). It's safe here because
+        ReferenceOutputAssembly=false already means the daemon's
+        compile graph doesn't see OWO's types — only its built DLL,
+        copied as content.
+      -->
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
   </ItemGroup>
 

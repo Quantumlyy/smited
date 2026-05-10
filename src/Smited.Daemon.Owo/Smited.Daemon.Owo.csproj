@@ -18,6 +18,10 @@
     <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+  </ItemGroup>
+
   <!--
     OWO is a Windows-native NuGet package; only restore on Windows hosts
     so `dotnet build` on Mac produces an empty assembly without trying to

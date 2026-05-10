@@ -11,17 +11,25 @@ namespace Smited.Daemon.Tests.Backends;
 
 public class OwoMuscleMapTests
 {
+    // Muscle is a struct, so its values can't appear directly in
+    // [InlineData] (attribute args must be constants/typeof/arrays).
+    // MemberData feeds them via runtime references instead.
+    public static IEnumerable<object[]> ZoneToMuscle => new[]
+    {
+        new object[] { "pectoral_l", Muscle.Pectoral_L },
+        new object[] { "pectoral_r", Muscle.Pectoral_R },
+        new object[] { "abdominal_l", Muscle.Abdominal_L },
+        new object[] { "abdominal_r", Muscle.Abdominal_R },
+        new object[] { "lumbar_l", Muscle.Lumbar_L },
+        new object[] { "lumbar_r", Muscle.Lumbar_R },
+        new object[] { "dorsal_l", Muscle.Dorsal_L },
+        new object[] { "dorsal_r", Muscle.Dorsal_R },
+        new object[] { "arm_l", Muscle.Arm_L },
+        new object[] { "arm_r", Muscle.Arm_R },
+    };
+
     [Theory]
-    [InlineData("pectoral_l", Muscle.Pectoral_L)]
-    [InlineData("pectoral_r", Muscle.Pectoral_R)]
-    [InlineData("abdominal_l", Muscle.Abdominal_L)]
-    [InlineData("abdominal_r", Muscle.Abdominal_R)]
-    [InlineData("lumbar_l", Muscle.Lumbar_L)]
-    [InlineData("lumbar_r", Muscle.Lumbar_R)]
-    [InlineData("dorsal_l", Muscle.Dorsal_L)]
-    [InlineData("dorsal_r", Muscle.Dorsal_R)]
-    [InlineData("arm_l", Muscle.Arm_L)]
-    [InlineData("arm_r", Muscle.Arm_R)]
+    [MemberData(nameof(ZoneToMuscle))]
     public void Resolve_returns_the_matching_muscle(string zoneId, Muscle expected)
     {
         OwoMuscleMap.Resolve(zoneId).Should().Be(expected);
