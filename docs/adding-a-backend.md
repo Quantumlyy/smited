@@ -114,9 +114,16 @@ Users opt the backend in by adding a descriptor to their config:
 
 `BackendDescriptor.Id` is what clients use as `backend_id` over the wire and what the bodymap framework keys placements on.
 
-#### Multi-instance gotchas
+#### Singleton kinds
 
-`MockOwoBackend` is a DI singleton because `IMockOwoController` (used by tests) holds a reference to the same instance. The descriptor validator therefore allows at most one `mock_owo` descriptor. Real-hardware backends should be **transient** — `ActivatorUtilities.CreateInstance` creates a fresh backend per `TryCreate` call — so a user with two devices can declare two descriptors of the same kind with different ids. A backend that owns a singleton SDK (like OWO's `IOwoSdk`) needs to consider how the singleton behaves under multi-instance use; today's OWO factory will technically register two backends, but they'd fight over the same SDK and only one would work at a time.
+A backend kind is a **singleton kind** when its factory's underlying state can't be safely partitioned across multiple instances. The descriptor validator rejects configurations that declare more than one **enabled** descriptor of a singleton kind; disabled descriptors of the same kind are fine, since they don't reach the factory. The canonical list lives in `BackendDescriptorValidator.SingletonKinds`. Today:
+
+- **`mock_owo`** — registered as a DI singleton so `IMockOwoController` (used by tests and the future control surface) has a stable target. A second descriptor of the same kind would compete for the same instance's `OverrideId` / `OverrideDisplayName` overrides.
+- **`owo_skin`** — depends on a process-wide static `IOwoSdk`. The OWO SDK binds to one suit per process; two enabled `owo_skin` descriptors would race on `Send` / `Stop` and the device would fire whatever the most recent caller asked for.
+
+If you're adding a new backend kind whose factory shares state across instances (process-wide SDK, single hardware connection, file lock), add the kind to `SingletonKinds` so the validator catches misconfigurations up-front. Most new kinds are **not** singletons — bHaptics and PiShock both support multi-instance operation because each device has its own connection state, and the daemon should let users register one descriptor per device.
+
+For non-singleton kinds: implement `TryCreate` so it issues a fresh `IHapticBackend` per call (`ActivatorUtilities.CreateInstance` does this naturally — its returned object isn't shared across calls). The factory itself stays a DI singleton; only the backends it produces are transient.
 
 ### 6. Declare manufacturer-mandated forbidden regions
 
@@ -164,7 +171,7 @@ If the backend should accept runtime registrations via the `RegisterSensation` R
 
    Without `EnableWindowsTargeting`, cross-publishing a `net9.0-windows` project from a non-Windows host fails because the Windows desktop SDK refuses to load.
 4. The platform project references `Smited.Daemon.Abstractions` (so it can see `IHapticBackend` and any cross-platform helper types like `OwoBackendOptions`/`IOwoSdk`).
-5. The daemon project's reverse `ProjectReference` is conditional on `_TargetingWindows` and uses `<ReferenceOutputAssembly>false</ReferenceOutputAssembly>` so the build graph stays acyclic. Daemon source never imports the backend type — `BackendsServiceCollectionExtensions.AddOwoBackendIfWindows` loads both `OwoBackendFactory` and `StaticOwoSdk` via `Type.GetType("Smited.Daemon.<Platform>.<Type>, Smited.Daemon.<Platform>")` at runtime, wrapped in `FileNotFoundException` / `FileLoadException` / `TypeLoadException` catches. Both the factory class and any auxiliary singletons it depends on (e.g. an `IOwoSdk` impl) must be `public sealed class` so cross-assembly reflective instantiation works.
+5. The daemon project's reverse `ProjectReference` is conditional on `_TargetingWindows` and uses `<ReferenceOutputAssembly>false</ReferenceOutputAssembly>` so the build graph stays acyclic. Daemon source never imports the backend type — `BackendsServiceCollectionExtensions.AddOwoBackendIfWindows` loads both `OwoBackendFactory` and `StaticOwoSdk` via `Type.GetType("Smited.Daemon.<Platform>.<Type>, Smited.Daemon.<Platform>")` at runtime, wrapped in a deliberately broad `catch (Exception)`: the recoverable set for reflective assembly loading is open-ended (`BadImageFormatException` for wrong-architecture DLLs, `FileNotFoundException` / `FileLoadException` for missing transitive deps, `TypeLoadException` / `ReflectionTypeLoadException` for type-resolution failures, `PlatformNotSupportedException` on a downlevel runtime, …) and they all mean the same thing: "backend unavailable here." Both types load atomically — if either fails, neither registers — so a partial install can't leave a factory whose dependencies aren't satisfied. Both the factory class and any auxiliary singletons it depends on (e.g. an `IOwoSdk` impl) must be `public sealed class` so cross-assembly reflective instantiation works.
 
 ## Tests
 
