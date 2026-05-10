@@ -71,7 +71,14 @@ public sealed class OwoBackendFactory : IBackendFactory
             options.BackendId = descriptor.Id;
         }
 
-        return ActivatorUtilities.CreateInstance<OwoBackend>(services, options);
+        var backend = ActivatorUtilities.CreateInstance<OwoBackend>(services, options);
+
+        if (!string.IsNullOrEmpty(descriptor.DisplayName))
+        {
+            backend.OverrideDisplayName(descriptor.DisplayName);
+        }
+
+        return backend;
     }
 }
 #endif

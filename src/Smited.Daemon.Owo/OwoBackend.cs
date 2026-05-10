@@ -143,6 +143,9 @@ public sealed class OwoBackend : IHapticBackend
             StringComparer.OrdinalIgnoreCase);
     }
 
+    private string _displayName = "OWO Skin";
+    private bool _displayNameOverridden;
+
     /// <inheritdoc />
     public string Id => _options.BackendId;
 
@@ -150,7 +153,27 @@ public sealed class OwoBackend : IHapticBackend
     public string Kind => "owo_skin";
 
     /// <inheritdoc />
-    public string DisplayName => "OWO Skin";
+    public string DisplayName => _displayName;
+
+    /// <summary>
+    /// Replaces the default <see cref="DisplayName"/> with a per-descriptor
+    /// override. One-shot per instance; a conflicting second override
+    /// throws so a misconfiguration that lands two descriptors at the
+    /// same backend instance can't silently clobber the first override.
+    /// Mirrors <c>MockOwoBackend.OverrideDisplayName</c>.
+    /// </summary>
+    internal void OverrideDisplayName(string displayName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(displayName);
+        if (_displayNameOverridden && !string.Equals(_displayName, displayName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"OwoBackend.DisplayName was already overridden to '{_displayName}'; "
+                + $"cannot re-override to '{displayName}'.");
+        }
+        _displayName = displayName;
+        _displayNameOverridden = true;
+    }
 
     /// <inheritdoc />
     public BackendStatus Status { get; private set; } = BackendStatus.Disconnected;
