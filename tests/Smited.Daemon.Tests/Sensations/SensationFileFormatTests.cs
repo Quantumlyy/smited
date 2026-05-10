@@ -41,6 +41,8 @@ public class SensationFileFormatTests
 
         dto.Name.Should().Be("compile_error_severe");
         dto.BackendKind.Should().Be("owo_skin");
+        dto.Scope.Should().Be(SensationFileScope.Kind);
+        dto.BackendId.Should().BeNull();
         dto.DisplayName.Should().Be("Compile Error (Severe)");
         dto.Tags.Should().BeEquivalentTo("build", "error", "severe");
         dto.DefaultZoneIds.Should().BeEquivalentTo("pectoral_l", "pectoral_r");
@@ -53,6 +55,35 @@ public class SensationFileFormatTests
         micro.Parameters["duration"].Should().Be(new ParameterValue.Duration(TimeSpan.FromMilliseconds(400)));
         micro.Parameters["ramp_up"].Should().Be(new ParameterValue.Duration(TimeSpan.FromMilliseconds(50)));
         micro.Parameters["ramp_down"].Should().Be(new ParameterValue.Duration(TimeSpan.FromMilliseconds(150)));
+    }
+
+    [Fact]
+    public void Id_scoped_file_round_trips_scope_and_backend_id()
+    {
+        const string idScoped = """
+            {
+              "name": "x",
+              "backend_kind": "owo_skin",
+              "scope": "id",
+              "backend_id": "mock-owo",
+              "display_name": "x",
+              "estimated_duration": "0s",
+              "definition": {
+                "microsensations": [{
+                  "parameters": {
+                    "frequency": { "number": 1 }
+                  }
+                }]
+              }
+            }
+            """;
+
+        var dto = SensationFileSerializer.Deserialize(idScoped);
+        var json = SensationFileSerializer.Serialize(dto);
+        var parsed = SensationFileSerializer.Deserialize(json);
+
+        parsed.Scope.Should().Be(SensationFileScope.Id);
+        parsed.BackendId.Should().Be("mock-owo");
     }
 
     [Fact]

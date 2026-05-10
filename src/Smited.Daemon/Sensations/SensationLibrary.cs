@@ -87,9 +87,10 @@ internal sealed class SensationLibrary
     /// <summary>
     /// Registers <paramref name="sensation"/> in the in-memory store and
     /// persists it to <c>LibraryRoot/<paramref name="backendKind"/>/<see cref="RegisteredSensation.Name"/>.json</c>
-    /// so it survives a daemon restart. The on-disk format is symmetric
-    /// with what <see cref="SensationLoader"/> reads at boot — authored
-    /// and runtime-registered sensations are indistinguishable.
+    /// so it survives a daemon restart. Runtime registrations are written
+    /// with <c>scope="id"</c> so they reload only for the same backend id;
+    /// authored files keep the default <c>scope="kind"</c> and bind to
+    /// every backend of that kind.
     /// </summary>
     /// <remarks>
     /// In-memory insertion happens first; the disk write is attempted
@@ -191,7 +192,7 @@ internal sealed class SensationLibrary
     {
         var path = ResolveFilePath(backendKind, sensation.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var dto = SensationFileSerializer.ToDto(sensation, backendKind);
+        var dto = SensationFileSerializer.ToDto(sensation, backendKind, SensationFileScope.Id);
         var json = JsonSerializer.Serialize(dto, IndentedOptions);
         return File.WriteAllTextAsync(path, json, ct);
     }

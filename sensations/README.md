@@ -8,6 +8,7 @@ JSON files under this directory describe pre-registered sensations the daemon lo
 {
   "name": "compile_error_severe",
   "backend_kind": "owo_skin",
+  "scope": "kind",
   "display_name": "Compile Error (Severe)",
   "description": "Strong jab to both pectorals.",
   "tags": ["build", "error", "severe"],
@@ -32,8 +33,10 @@ JSON files under this directory describe pre-registered sensations the daemon lo
 
 ### Keys
 
-- `name` — library key, unique within the file's `backend_kind`. Lowercase ident shape (`^[a-z0-9][a-z0-9_-]*$`).
-- `backend_kind` — file-level binding to a backend family (e.g. `owo_skin`). The loader binds the sensation to **every** registered backend whose `Kind` matches, so one file works against any number of identically-typed backends.
+- `name` — library key. Lowercase ident shape (`^[a-z0-9][a-z0-9_-]*$`).
+- `backend_kind` — directory-level binding to a backend family (e.g. `owo_skin`). The file must live under the matching `sensations/<backend_kind>/` directory.
+- `scope` — optional. `"kind"` (default) binds the file to **every** registered backend whose `Kind` matches. `"id"` binds it only to `backend_id`.
+- `backend_id` — required when `scope` is `"id"`. If that backend is absent at startup, the loader skips the file.
 - `display_name` — human-readable label for UIs.
 - `description` — free text, surfaces in tooling.
 - `tags` — free-form short tokens used by `ListSensations` filtering.
@@ -75,4 +78,4 @@ A failing file aborts the daemon's start; fix it and restart.
    grpcurl -plaintext localhost:7777 smited.v1.SmitedService/ListSensations
    ```
 
-Runtime registration via `RegisterSensation` is also supported by backends advertising the `sensation_registry_mutable` capability — check `DescribeBackend` to confirm.
+Runtime registration via `RegisterSensation` is also supported by backends advertising the `sensation_registry_mutable` capability — check `DescribeBackend` to confirm. Runtime-registered files are written with `scope: "id"` and `backend_id` so they reload only for the backend that accepted the registration.

@@ -23,7 +23,7 @@ public class SensationLoaderTests : IDisposable
         }
     }
 
-    private static FakeBackend BuildOwoBackend()
+    private static FakeBackend BuildOwoBackend(string id = "mock-owo")
     {
         var schema = new ParameterSchema();
         schema.Parameters.Add(new ParameterDef
@@ -62,7 +62,7 @@ public class SensationLoaderTests : IDisposable
         torso.ZoneIds.Add("pectoral_r");
         topology.Groups.Add(torso);
 
-        return new FakeBackend("mock-owo", kind: "owo_skin", capabilities: ["ems"])
+        return new FakeBackend(id, kind: "owo_skin", capabilities: ["ems"])
         {
             Parameters = schema,
             Zones = topology,
@@ -128,6 +128,114 @@ public class SensationLoaderTests : IDisposable
         var s = library.Get("mock-owo", "ping")!;
         s.Tags.Should().BeEquivalentTo("test");
         s.DefaultIntensity.Should().Be(50);
+    }
+
+    [Fact]
+    public async Task Kind_scope_loads_for_every_matching_backend()
+    {
+        WriteSensation("owo_skin", "ping.json", """
+            {
+              "name": "ping",
+              "backend_kind": "owo_skin",
+              "scope": "kind",
+              "display_name": "Ping",
+              "description": "",
+              "tags": ["test"],
+              "default_zone_ids": ["pectoral_l"],
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  {
+                    "parameters": {
+                      "frequency": { "number": 50 },
+                      "intensity": { "number": 50 },
+                      "duration": { "duration": "0.2s" }
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out var library, BuildOwoBackend("mock-owo-a"), BuildOwoBackend("mock-owo-b"));
+
+        await loader.StartAsync(CancellationToken.None);
+
+        library.Get("mock-owo-a", "ping").Should().NotBeNull();
+        library.Get("mock-owo-b", "ping").Should().NotBeNull();
+        library.Count.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Id_scope_loads_only_for_the_named_backend()
+    {
+        WriteSensation("owo_skin", "ping.json", """
+            {
+              "name": "ping",
+              "backend_kind": "owo_skin",
+              "scope": "id",
+              "backend_id": "mock-owo-b",
+              "display_name": "Ping",
+              "description": "",
+              "tags": ["test"],
+              "default_zone_ids": ["pectoral_l"],
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  {
+                    "parameters": {
+                      "frequency": { "number": 50 },
+                      "intensity": { "number": 50 },
+                      "duration": { "duration": "0.2s" }
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out var library, BuildOwoBackend("mock-owo-a"), BuildOwoBackend("mock-owo-b"));
+
+        await loader.StartAsync(CancellationToken.None);
+
+        library.Get("mock-owo-a", "ping").Should().BeNull();
+        library.Get("mock-owo-b", "ping").Should().NotBeNull();
+        library.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Id_scope_skips_when_the_named_backend_is_absent()
+    {
+        WriteSensation("owo_skin", "ping.json", """
+            {
+              "name": "ping",
+              "backend_kind": "owo_skin",
+              "scope": "id",
+              "backend_id": "missing-owo",
+              "display_name": "Ping",
+              "description": "",
+              "tags": ["test"],
+              "default_zone_ids": ["pectoral_l"],
+              "estimated_duration": "0.2s",
+              "definition": {
+                "microsensations": [
+                  {
+                    "parameters": {
+                      "frequency": { "number": 50 },
+                      "intensity": { "number": 50 },
+                      "duration": { "duration": "0.2s" }
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var loader = BuildLoader(out var library, BuildOwoBackend("mock-owo"));
+
+        await loader.StartAsync(CancellationToken.None);
+
+        library.Count.Should().Be(0);
     }
 
     [Fact]

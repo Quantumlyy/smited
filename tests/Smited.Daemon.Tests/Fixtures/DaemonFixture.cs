@@ -31,14 +31,17 @@ internal sealed class DaemonFixture : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly string _libraryRoot;
+    private readonly bool _ownsLibraryRoot;
     private readonly string _userConfigDir;
     private readonly string? _previousUserConfigDir;
 
     public DaemonFixture(
         Action<string>? seed = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        string? libraryRoot = null)
     {
-        _libraryRoot = Path.Combine(Path.GetTempPath(), "smited-fixture-" + Guid.NewGuid().ToString("N"));
+        _libraryRoot = libraryRoot ?? Path.Combine(Path.GetTempPath(), "smited-fixture-" + Guid.NewGuid().ToString("N"));
+        _ownsLibraryRoot = libraryRoot is null;
         Directory.CreateDirectory(_libraryRoot);
         Directory.CreateDirectory(Path.Combine(_libraryRoot, "owo_skin"));
         seed?.Invoke(_libraryRoot);
@@ -141,7 +144,7 @@ internal sealed class DaemonFixture : IDisposable
         Environment.SetEnvironmentVariable("SMITED_CONFIG_DIR", _previousUserConfigDir);
         try
         {
-            if (Directory.Exists(_libraryRoot))
+            if (_ownsLibraryRoot && Directory.Exists(_libraryRoot))
             {
                 Directory.Delete(_libraryRoot, recursive: true);
             }

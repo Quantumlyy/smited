@@ -101,15 +101,41 @@ internal sealed class SensationLoader : IHostedService
 
         ValidateFileLevel(path, file);
 
+        if (file.Scope == SensationFileScope.Id)
+        {
+            var backend = backends.FirstOrDefault(b =>
+                string.Equals(b.Id, file.BackendId, StringComparison.OrdinalIgnoreCase));
+            if (backend is null)
+            {
+                _logger.LogInformation(
+                    "Skipping sensation file '{Path}' scoped to absent backend id '{BackendId}'.",
+                    path, file.BackendId);
+                return;
+            }
+            ValidateAgainstBackend(path, file, backend);
+            var sensation = SensationFileSerializer.ToInternal(file, backend.Id, _time.GetUtcNow());
+            RegisterLoaded(path, file, backend, sensation);
+            return;
+        }
+
         foreach (var backend in backends)
         {
             ValidateAgainstBackend(path, file, backend);
             var sensation = SensationFileSerializer.ToInternal(file, backend.Id, _time.GetUtcNow());
-            if (!_library.Register(sensation, overwrite: false))
-            {
-                throw new SmitedStartupException(
-                    $"Sensation '{file.Name}' already registered for backend '{backend.Id}' before file '{path}' was loaded.");
-            }
+            RegisterLoaded(path, file, backend, sensation);
+        }
+    }
+
+    private void RegisterLoaded(
+        string path,
+        SensationFileDto file,
+        IHapticBackend backend,
+        RegisteredSensation sensation)
+    {
+        if (!_library.Register(sensation, overwrite: false))
+        {
+            throw new SmitedStartupException(
+                $"Sensation '{file.Name}' already registered for backend '{backend.Id}' before file '{path}' was loaded.");
         }
     }
 
@@ -132,6 +158,21 @@ internal sealed class SensationLoader : IHostedService
             throw new SmitedStartupException($"Sensation file '{path}' has empty name.");
         }
         EnsureIdent(path, "name", file.Name, maxLen: 64);
+
+        if (file.Scope is not SensationFileScope.Kind and not SensationFileScope.Id)
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has invalid scope='{file.Scope}'; valid values are 'kind' and 'id'.");
+        }
+        if (file.Scope == SensationFileScope.Id && string.IsNullOrEmpty(file.BackendId))
+        {
+            throw new SmitedStartupException(
+                $"Sensation file '{path}' has scope='id' but no backend_id.");
+        }
+        if (!string.IsNullOrEmpty(file.BackendId))
+        {
+            EnsureIdent(path, "backend_id", file.BackendId, maxLen: 64);
+        }
 
         if (string.IsNullOrEmpty(file.DisplayName))
         {

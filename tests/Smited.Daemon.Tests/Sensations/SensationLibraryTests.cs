@@ -160,6 +160,8 @@ public class SensationLibraryTests : IDisposable
         var roundTrip = SensationFileSerializer.Deserialize(File.ReadAllText(path));
         roundTrip.Name.Should().Be("ping_disk");
         roundTrip.BackendKind.Should().Be("owo_skin");
+        roundTrip.Scope.Should().Be(SensationFileScope.Id);
+        roundTrip.BackendId.Should().Be("mock-owo");
     }
 
     [Fact]

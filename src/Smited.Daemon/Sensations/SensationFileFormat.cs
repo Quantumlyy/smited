@@ -11,6 +11,7 @@ namespace Smited.Daemon.Sensations;
 /// {
 ///   "name": "compile_error_severe",
 ///   "backend_kind": "owo_skin",
+///   "scope": "kind",
 ///   "display_name": "Compile Error (Severe)",
 ///   "description": "...",
 ///   "tags": ["build", "error", "severe"],
@@ -31,6 +32,12 @@ public sealed class SensationFileDto
 
     [JsonPropertyName("backend_kind")] public string BackendKind { get; set; } = "";
 
+    [JsonPropertyName("scope")] public string Scope { get; set; } = SensationFileScope.Kind;
+
+    [JsonPropertyName("backend_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackendId { get; set; }
+
     [JsonPropertyName("display_name")] public string DisplayName { get; set; } = "";
 
     [JsonPropertyName("description")] public string Description { get; set; } = "";
@@ -46,6 +53,12 @@ public sealed class SensationFileDto
     public TimeSpan EstimatedDuration { get; set; }
 
     [JsonPropertyName("definition")] public InlineSensationDto Definition { get; set; } = new();
+}
+
+public static class SensationFileScope
+{
+    public const string Kind = "kind";
+    public const string Id = "id";
 }
 
 public sealed class InlineSensationDto
@@ -200,9 +213,9 @@ public static class SensationFileSerializer
 
     /// <summary>
     /// Resolve a parsed file to an internal <see cref="RegisteredSensation"/>
-    /// for one specific backend (binding the file's <c>backend_kind</c> to a
-    /// concrete <paramref name="backendId"/>). The <paramref name="now"/>
-    /// stamp is used for <c>RegisteredAt</c>.
+    /// for one specific backend (binding either the file's <c>backend_kind</c>
+    /// or its <c>backend_id</c> to a concrete <paramref name="backendId"/>).
+    /// The <paramref name="now"/> stamp is used for <c>RegisteredAt</c>.
     /// </summary>
     public static RegisteredSensation ToInternal(
         SensationFileDto file,
@@ -238,17 +251,31 @@ public static class SensationFileSerializer
     /// <param name="backendKind">
     /// The hardware family this file binds to. Required because the
     /// internal record carries only <c>BackendId</c> (a runtime id);
-    /// <c>backend_kind</c> is the file-level binding the loader uses.
+    /// <c>backend_kind</c> is the directory-level binding the loader uses.
     /// </param>
-    public static SensationFileDto ToDto(RegisteredSensation sensation, string backendKind)
+    /// <param name="scope">
+    /// <c>"kind"</c> for authored files that bind to every backend of this
+    /// kind, or <c>"id"</c> for runtime registrations that must reload only
+    /// for the original backend id.
+    /// </param>
+    public static SensationFileDto ToDto(
+        RegisteredSensation sensation,
+        string backendKind,
+        string scope = SensationFileScope.Kind)
     {
         ArgumentNullException.ThrowIfNull(sensation);
         ArgumentException.ThrowIfNullOrEmpty(backendKind);
+        if (scope is not SensationFileScope.Kind and not SensationFileScope.Id)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scope), scope, "scope must be 'kind' or 'id'");
+        }
 
         return new SensationFileDto
         {
             Name = sensation.Name,
             BackendKind = backendKind,
+            Scope = scope,
+            BackendId = scope == SensationFileScope.Id ? sensation.BackendId : null,
             DisplayName = sensation.DisplayName,
             Description = sensation.Description,
             Tags = sensation.Tags.ToList(),

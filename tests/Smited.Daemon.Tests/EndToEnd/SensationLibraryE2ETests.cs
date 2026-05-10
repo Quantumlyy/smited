@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.DependencyInjection;
+using Smited.Daemon.Backends;
 using Smited.Daemon.Tests.Fixtures;
 using Smited.V1;
 using Xunit;
@@ -145,6 +147,51 @@ public class SensationLibraryE2ETests : IDisposable
         response.Error.Should().Contain("intensity");
     }
 
+    [Fact]
+    public async Task Runtime_registered_sensation_reloads_only_for_original_backend_id()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "smited-runtime-scope-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (var first = new DaemonFixture(
+                       configureServices: services =>
+                           services.AddSingleton<IHapticBackend>(BuildOwoLikeBackend("mock-owo-b")),
+                       libraryRoot: root))
+            {
+                var response = await first.Client.RegisterSensationAsync(new RegisterSensationRequest
+                {
+                    Sensation = BuildRegisteredSensation("runtime_scoped", backendId: "mock-owo"),
+                });
+
+                response.Registered.Should().BeTrue();
+            }
+
+            using var second = new DaemonFixture(
+                configureServices: services =>
+                    services.AddSingleton<IHapticBackend>(BuildOwoLikeBackend("mock-owo-b")),
+                libraryRoot: root);
+
+            var backendA = await second.Client.ListSensationsAsync(new ListSensationsRequest
+            {
+                BackendId = "mock-owo",
+            });
+            var backendB = await second.Client.ListSensationsAsync(new ListSensationsRequest
+            {
+                BackendId = "mock-owo-b",
+            });
+
+            backendA.Sensations.Select(s => s.Name).Should().Contain("runtime_scoped");
+            backendB.Sensations.Select(s => s.Name).Should().NotContain("runtime_scoped");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static RegisteredSensation BuildRegisteredSensation(string name, string backendId)
     {
         var inline = new InlineSensation();
@@ -167,4 +214,7 @@ public class SensationLibraryE2ETests : IDisposable
         registered.DefaultZoneIds.Add("pectoral_l");
         return registered;
     }
+
+    private static FakeBackend BuildOwoLikeBackend(string id) =>
+        new(id, kind: "owo_skin", displayName: id, capabilities: ["ems", "zoned", "sensation_registry_mutable"]);
 }
