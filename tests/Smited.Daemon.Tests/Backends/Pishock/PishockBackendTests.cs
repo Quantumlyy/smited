@@ -189,6 +189,43 @@ public class PishockBackendTests
     }
 
     [Fact]
+    public async Task TriggerAsync_with_zero_duration_microsensation_does_not_call_client()
+    {
+        // Schema allows duration=0; treat as a no-op (delay-only step
+        // when delay_before is set, otherwise inert). Without this,
+        // cloud's whole-second rounding silently turned a 0ms microsensation
+        // into a 1-second device fire.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Cloud,
+            Username = "u", ApiKey = "k", ShareCode = "s",
+        });
+        await using var __ = backend;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["op"] = new ParameterValue.EnumValue(PishockOp.Vibrate.ToString()),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.Zero),
+            ["intensity"] = new ParameterValue.Number(50),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "z", SensationName: "zero",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: null, Priority: 0, ClientTraceId: "trace",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+
+        // Pump generously to make sure no client call happens — if the
+        // bug were still present, cloud rounding would have turned
+        // duration=0 into 1s and a Task.Delay(1s) would queue a client
+        // call after the advance.
+        await PumpUntil(() => false, time, TimeSpan.FromMilliseconds(500));
+
+        client.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Disposing_the_backend_does_not_throw()
     {
         var (backend, _, _) = NewBackend();

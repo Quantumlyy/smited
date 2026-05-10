@@ -117,13 +117,12 @@ public sealed class MockPishockBackend : IHapticBackend
             PishockTriggerValidator.ValidateMicrosensation(i, request.Microsensations[i], _options);
         }
 
-        // Pre-allocate one bucket token per microsensation atomically.
-        // If the sequence can't fit in the current bucket, the bucket
-        // is unchanged and the trigger is rejected — partial fires
-        // would silently drop pulses the user authored, and a
-        // non-atomic loop would leak tokens up to the failure point
-        // into a state the next trigger inherits.
-        var needed = request.Microsensations.Count;
+        // Pre-allocate one bucket token per FIREABLE microsensation
+        // atomically. Zero-duration microsensations are no-ops — they
+        // don't fire on the device, so they don't consume bucket
+        // budget. Atomic so a partial failure can't leak tokens for
+        // the next trigger to inherit.
+        var needed = CountFireable(request.Microsensations);
         if (needed > 0 && !_bucket.TryConsume(needed))
         {
             throw new BackendTriggerRejectedException(
@@ -204,6 +203,19 @@ public sealed class MockPishockBackend : IHapticBackend
     }
 
     private void EmitEvent(BackendEvent evt) => _events.Writer.TryWrite(evt);
+
+    private static int CountFireable(IReadOnlyList<MicrosensationParameters> micros)
+    {
+        var count = 0;
+        foreach (var m in micros)
+        {
+            if (MicrosensationReader.ReadDuration(m, "duration") > TimeSpan.Zero)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
 
     private void LogPulses(BackendTriggerRequest request)
     {

@@ -110,12 +110,12 @@ public sealed class PishockBackend : IHapticBackend
             PishockTriggerValidator.ValidateMicrosensation(i, request.Microsensations[i], _options);
         }
 
-        // Pre-allocate one token per microsensation atomically. See the
-        // matching block in MockPishockBackend for the rationale: a
-        // non-atomic loop leaks tokens on partial failure and breaks
-        // follow-up triggers that depended on those tokens still being
-        // in the bucket.
-        var needed = request.Microsensations.Count;
+        // Pre-allocate one token per FIREABLE microsensation atomically.
+        // Zero-duration microsensations are no-ops (skipped during
+        // playback); they don't consume bucket budget. A non-atomic
+        // loop would also leak tokens on partial failure — see the
+        // matching block in MockPishockBackend for the rationale.
+        var needed = CountFireable(request.Microsensations);
         if (needed > 0 && !_bucket.TryConsume(needed))
         {
             throw new BackendTriggerRejectedException(
@@ -155,6 +155,18 @@ public sealed class PishockBackend : IHapticBackend
 
                 var op = MicrosensationReader.ReadOp(micro);
                 var duration = MicrosensationReader.ReadDuration(micro, "duration");
+
+                // Zero authored duration is a no-op step: skip the
+                // client call entirely. Cloud's whole-second rounding
+                // would otherwise turn a silent microsensation into a
+                // 1-second device fire (the cloud API's minimum). The
+                // delay_before above already ran, so a delay-only
+                // step is preserved.
+                if (duration <= TimeSpan.Zero)
+                {
+                    continue;
+                }
+
                 var authoredIntensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
                 // Apply the trigger's runtime IntensityScale; the
                 // device sees the scaled value, not the authored one.
@@ -231,4 +243,17 @@ public sealed class PishockBackend : IHapticBackend
     }
 
     private void EmitEvent(BackendEvent evt) => _events.Writer.TryWrite(evt);
+
+    private static int CountFireable(IReadOnlyList<MicrosensationParameters> micros)
+    {
+        var count = 0;
+        foreach (var m in micros)
+        {
+            if (MicrosensationReader.ReadDuration(m, "duration") > TimeSpan.Zero)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
 }

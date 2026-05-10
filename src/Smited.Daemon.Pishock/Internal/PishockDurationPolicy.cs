@@ -17,6 +17,15 @@ internal static class PishockDurationPolicy
 {
     public static TimeSpan Effective(PishockTransportMode mode, TimeSpan authored)
     {
+        // Zero authored duration is a no-op (delay-only step when
+        // delay_before is set, otherwise inert). Both transports
+        // preserve that — without this guard, cloud's Math.Max(1, ...)
+        // would round 0 up to 1s and silently fire a 1-second pulse
+        // on a microsensation the user authored as silent.
+        if (authored <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
         if (mode == PishockTransportMode.Cloud)
         {
             // Cloud API takes Duration in whole seconds, range 1..15.
@@ -24,7 +33,7 @@ internal static class PishockDurationPolicy
             // fire a shorter op than the user authored, more surprising
             // than firing a slightly longer one. 200ms rounds to 1s,
             // 1100ms rounds to 2s.
-            var seconds = Math.Max(1, (int)Math.Ceiling(authored.TotalMilliseconds / 1000.0));
+            var seconds = (int)Math.Ceiling(authored.TotalMilliseconds / 1000.0);
             return TimeSpan.FromSeconds(seconds);
         }
         return authored;
