@@ -164,6 +164,7 @@ app.MapPanic();
             branch.UseEndpoints(endpoints =>
             {
                 endpoints.MapBlazorHub();
+                endpoints.MapBreaker();
                 endpoints.MapFallbackToPage("/_Host");
             });
         });

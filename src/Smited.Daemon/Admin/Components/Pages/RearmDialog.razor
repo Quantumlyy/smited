@@ -1,0 +1,187 @@
+@implements IDisposable
+@inject IBreakerService Breaker
+@inject IBreakerChallengeService Challenges
+@inject ILogger<RearmDialog> Logger
+
+@*  Two-step modal for re-arming the daemon-wide circuit breaker.
+    Step 1 (Confirm): "Are you sure?" with explicit Yes/No.
+    Step 2 (Challenge): show a single-use challenge token and a confirm
+    button; click consumes the token and re-arms the breaker. The
+    challenge expires after 30 seconds; expired tokens fail with a
+    visible error and the dialog returns to the Confirm step.
+
+    The dialog uses direct service injection rather than the REST
+    endpoints in Admin/BreakerEndpoints.cs - those exist for external
+    clients (smited-watch, ops scripts). The double-step + single-use
+    semantics defend against accidental re-arms (spam-clicking,
+    panicked operators) without depending on auth.  *@
+
+@if (_step != Step.Hidden)
+{
+    <div class="modal-backdrop" @onclick="Cancel">
+        <div class="modal-card" @onclick:stopPropagation="true" role="dialog" aria-modal="true">
+            @if (_step == Step.Confirm)
+            {
+                <h3>Re-arm daemon?</h3>
+                <p>
+                    The breaker is currently latched. Re-arming will allow new
+                    sensations to fire on all backends.
+                </p>
+                <p style="color:var(--muted);font-size:0.85rem">
+                    Verify the cause of the panic before continuing.
+                </p>
+                @if (_error is not null)
+                {
+                    <p class="error">@_error</p>
+                }
+                <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+                    <button class="btn-secondary" @onclick="Cancel">Cancel</button>
+                    <button class="btn-primary" @onclick="GenerateChallengeAsync">Yes, re-arm</button>
+                </div>
+            }
+            else if (_step == Step.Challenge)
+            {
+                <h3>Confirm re-arm</h3>
+                <p>
+                    A single-use challenge has been generated and is valid for
+                    @SecondsRemaining seconds. Click <strong>Confirm re-arm</strong>
+                    to consume the challenge and reset the breaker.
+                </p>
+                <pre style="background:var(--muted-bg);padding:0.5rem;border-radius:4px;font-size:0.75rem;word-break:break-all">@_challenge?.Token</pre>
+                @if (_error is not null)
+                {
+                    <p class="error">@_error</p>
+                }
+                <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+                    <button class="btn-secondary" @onclick="Cancel">Cancel</button>
+                    <button class="btn-primary" @onclick="VerifyAndRearmAsync">Confirm re-arm</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private enum Step { Hidden, Confirm, Challenge }
+
+    private Step _step = Step.Hidden;
+    private BreakerChallenge? _challenge;
+    private string? _error;
+    private CancellationTokenSource? _countdownCts;
+
+    private int SecondsRemaining
+    {
+        get
+        {
+            if (_challenge is null) return 0;
+            var left = (int)Math.Floor((_challenge.ExpiresAt - DateTimeOffset.UtcNow).TotalSeconds);
+            return left < 0 ? 0 : left;
+        }
+    }
+
+    /// <summary>
+    /// Open the dialog at the Confirm step. Called by Header.razor's
+    /// re-arm banner button. Idempotent: opening an already-open dialog
+    /// resets it back to Confirm and discards any in-flight challenge.
+    /// </summary>
+    public void Show()
+    {
+        StopCountdown();
+        _challenge = null;
+        _error = null;
+        _step = Step.Confirm;
+        StateHasChanged();
+    }
+
+    private async Task GenerateChallengeAsync()
+    {
+        _error = null;
+        try
+        {
+            _challenge = await Challenges.GenerateAsync(default);
+            _step = Step.Challenge;
+            StartCountdown();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate breaker rearm challenge");
+            _error = "Could not generate a challenge. Try again.";
+        }
+    }
+
+    private async Task VerifyAndRearmAsync()
+    {
+        if (_challenge is null)
+        {
+            _error = "No challenge to verify.";
+            return;
+        }
+
+        _error = null;
+        try
+        {
+            var ok = await Challenges.VerifyAndConsumeAsync(_challenge.Token, default);
+            if (!ok)
+            {
+                // Expired or already consumed. The token is gone; bounce
+                // back to the Confirm step so the operator can generate
+                // a fresh one.
+                _error = "Challenge expired or already consumed. Please re-arm again.";
+                _challenge = null;
+                StopCountdown();
+                _step = Step.Confirm;
+                return;
+            }
+
+            Breaker.Rearm();
+            StopCountdown();
+            _challenge = null;
+            _step = Step.Hidden;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to verify breaker rearm challenge");
+            _error = "Re-arm failed. Try again.";
+        }
+    }
+
+    private void Cancel()
+    {
+        StopCountdown();
+        _challenge = null;
+        _error = null;
+        _step = Step.Hidden;
+    }
+
+    private void StartCountdown()
+    {
+        StopCountdown();
+        _countdownCts = new CancellationTokenSource();
+        var token = _countdownCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), token);
+                    await InvokeAsync(StateHasChanged);
+                    if (_challenge is { } c && DateTimeOffset.UtcNow >= c.ExpiresAt)
+                    {
+                        return;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private void StopCountdown()
+    {
+        _countdownCts?.Cancel();
+        _countdownCts?.Dispose();
+        _countdownCts = null;
+    }
+
+    public void Dispose() => StopCountdown();
+}
