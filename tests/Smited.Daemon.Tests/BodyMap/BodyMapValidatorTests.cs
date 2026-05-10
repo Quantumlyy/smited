@@ -559,6 +559,63 @@ public class BodyMapValidatorTests
     }
 
     [Fact]
+    public void Empty_ZoneIds_produces_EmptyPlacement_error()
+    {
+        // The Placement contract is "one or more zones." An empty
+        // ZoneIds list silently produced zero expanded entries (no
+        // errors, no index contributions) but still inflated the
+        // banner's placement count. EmptyPlacement is fatal so the
+        // misconfiguration surfaces.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = new List<string>(),
+                    Region = BodyRegion.LeftThigh,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().Contain(
+            e => e.Kind == BodyMapErrorKind.EmptyPlacement
+              && e.BackendId == "vest");
+    }
+
+    [Fact]
+    public void Null_ZoneIds_produces_EmptyPlacement_error()
+    {
+        // Defensive: a JSON config that omits ZoneIds entirely could
+        // bind the field to null on the Placement record despite
+        // List<string>'s default initializer.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = null!,
+                    Region = BodyRegion.LeftThigh,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().Contain(
+            e => e.Kind == BodyMapErrorKind.EmptyPlacement);
+    }
+
+    [Fact]
     public void Same_zone_with_different_casing_is_DuplicateZonePlacement()
     {
         // GroupBy on the (BackendId, ZoneId) tuple defaulted to

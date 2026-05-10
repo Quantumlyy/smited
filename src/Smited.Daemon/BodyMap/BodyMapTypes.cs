@@ -102,6 +102,17 @@ internal enum BodyMapErrorKind
     /// catches both shapes after group expansion.
     /// </remarks>
     DuplicateZonePlacement,
+
+    /// <summary>
+    /// <c>Placement.ZoneIds</c> is null or empty. The
+    /// <see cref="Placement"/> contract is "one or more zones";
+    /// silently dropping the placement (the previous behavior, since
+    /// the expand pass produced zero entries for an empty list) hid
+    /// configuration mistakes and inflated the banner placement count
+    /// with ghost entries. Fatal — every <c>Placement</c> must
+    /// declare at least one leaf zone or group id.
+    /// </summary>
+    EmptyPlacement,
 }
 
 /// <summary>

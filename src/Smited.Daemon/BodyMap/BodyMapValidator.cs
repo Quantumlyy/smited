@@ -119,13 +119,41 @@ internal sealed class BodyMapValidator
             .Except(options.AllowOverrideRegions)
             .ToImmutableHashSet();
 
-        // Pass 1: validate backend ids and expand each placement into
-        // its (backend, leafZone, region, source) tuples. UnknownBackend,
-        // BackendDeclined, and UnknownZone errors land here. Placements
-        // with an Unspecified region are silently skipped.
+        // Pass 0: surface placements with no zones. The expand pass
+        // would otherwise no-op for them, leaving the misconfiguration
+        // invisible (no errors, no index entries) while still inflating
+        // BodyMapState.PlacementCount on the banner. Empty/null
+        // ZoneIds is a fatal validation error.
+        foreach (var placement in options.Placements)
+        {
+            if (placement.ZoneIds is null || placement.ZoneIds.Count == 0)
+            {
+                errors.Add(new BodyMapError(
+                    placement.BackendId,
+                    ZoneId: string.Empty,
+                    placement.Region,
+                    BodyMapErrorKind.EmptyPlacement,
+                    $"Placement for backend '{placement.BackendId}' in region "
+                    + $"'{placement.Region}' has no ZoneIds. A placement must "
+                    + "declare at least one leaf zone or zone group."));
+            }
+        }
+
+        // Pass 1: validate backend ids and expand each non-empty
+        // placement into its (backend, leafZone, region, source)
+        // tuples. UnknownBackend, BackendDeclined, and UnknownZone
+        // errors land here. Placements with an Unspecified region
+        // are silently skipped.
         var expanded = new List<ExpandedPlacement>();
         foreach (var placement in options.Placements)
         {
+            if (placement.ZoneIds is null || placement.ZoneIds.Count == 0)
+            {
+                // Already reported in pass 0; downstream passes don't
+                // need to defensively check.
+                continue;
+            }
+
             if (!backendById.TryGetValue(placement.BackendId, out var backend))
             {
                 if (declaredBackendIds.Contains(placement.BackendId))
