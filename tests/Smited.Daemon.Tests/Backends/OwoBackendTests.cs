@@ -254,6 +254,67 @@ public class OwoBackendTests
         backend.Sdk.DidNotReceive().Stop();
     }
 
+    [Fact]
+    public async Task TriggerAsync_expands_group_zones_to_member_leaves()
+    {
+        var backend = await NewReadyBackend();
+        await using var ____ = backend.B;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(50),
+            ["intensity"] = new ParameterValue.Number(50),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(100)),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "grouped",
+            SensationName: "test",
+            ZoneIds: new[] { "arms" }, // Group, must expand to arm_l + arm_r.
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        await backend.B.TriggerAsync(request, CancellationToken.None);
+        await Task.Delay(50);
+
+        backend.Sdk.Received(1).Send(Arg.Is<OwoSendCommand>(c =>
+            c.ZoneIds.Count == 2
+            && c.ZoneIds.Contains("arm_l")
+            && c.ZoneIds.Contains("arm_r")));
+    }
+
+    [Fact]
+    public async Task TriggerAsync_dedupes_zones_when_a_group_overlaps_a_leaf()
+    {
+        var backend = await NewReadyBackend();
+        await using var ____ = backend.B;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(50),
+            ["intensity"] = new ParameterValue.Number(50),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(100)),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "deduped",
+            SensationName: "test",
+            // arm_l is a member of "arms"; the duplicate must be collapsed.
+            ZoneIds: new[] { "arm_l", "arms" },
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        await backend.B.TriggerAsync(request, CancellationToken.None);
+        await Task.Delay(50);
+
+        backend.Sdk.Received(1).Send(Arg.Is<OwoSendCommand>(c =>
+            c.ZoneIds.Count == 2
+            && c.ZoneIds.Contains("arm_l")
+            && c.ZoneIds.Contains("arm_r")));
+    }
+
     private record ReadyBackend(OwoBackend B, IOwoSdk Sdk, FakeTimeProvider Time);
 
     private static async Task<ReadyBackend> NewReadyBackend()

@@ -58,6 +58,7 @@ public sealed class OwoBackend : IHapticBackend
     private CancellationTokenSource? _lifetimeCts;
     private Task? _heartbeatTask;
     private bool _lastSeenConnected;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _zoneGroupMembers;
 
     /// <summary>
     /// Constructed by the daemon's <c>BackendBootstrapper</c> via
@@ -85,6 +86,16 @@ public sealed class OwoBackend : IHapticBackend
             MaxConcurrent = 1,
             Policy = ConcurrencyPolicy.CancelOldest,
         };
+
+        // Memoize group membership so trigger-time expansion is just a
+        // dictionary lookup. The validator upstream accepts any zone id
+        // advertised in Zones (leaves AND groups), but the OWO SDK only
+        // knows about leaves — we have to expand groups here before
+        // OwoMuscleMap.Resolve runs.
+        _zoneGroupMembers = Zones.Groups.ToDictionary(
+            g => g.Id,
+            g => (IReadOnlyList<string>)g.ZoneIds.ToArray(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
@@ -675,7 +686,39 @@ public sealed class OwoBackend : IHapticBackend
             RampUpSeconds: rampUp,
             RampDownSeconds: rampDown,
             ExitDelaySeconds: exitDelay,
-            ZoneIds: request.ZoneIds);
+            ZoneIds: ExpandZones(request.ZoneIds));
+    }
+
+    /// <summary>
+    /// Replace any group ids (e.g. <c>torso</c>, <c>arms</c>, <c>all</c>)
+    /// with their member leaf zone ids and de-duplicate the result while
+    /// preserving first-seen order. Required because <c>OwoMuscleMap</c>
+    /// resolves leaves only and the upstream validator accepts groups.
+    /// </summary>
+    private IReadOnlyList<string> ExpandZones(IReadOnlyList<string> zoneIds)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var expanded = new List<string>(zoneIds.Count);
+
+        foreach (var id in zoneIds)
+        {
+            if (_zoneGroupMembers.TryGetValue(id, out var members))
+            {
+                foreach (var member in members)
+                {
+                    if (seen.Add(member))
+                    {
+                        expanded.Add(member);
+                    }
+                }
+            }
+            else if (seen.Add(id))
+            {
+                expanded.Add(id);
+            }
+        }
+
+        return expanded;
     }
 
     private static TimeSpan ComputeEstimatedDuration(BackendTriggerRequest request)
