@@ -29,9 +29,22 @@ internal sealed class HistoryDbInitializer : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await using var db = await _factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
-        _log.LogInformation("History database ready at {Path}", _dbPath);
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+            _log.LogInformation("History database ready at {Path}", _dbPath);
+        }
+        catch (OperationCanceledException)
+        {
+            // shutdown — fine
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "History database initialization failed at {Path}; continuing without guaranteed history persistence",
+                _dbPath);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

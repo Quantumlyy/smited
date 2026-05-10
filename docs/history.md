@@ -45,4 +45,4 @@ Set `Smited.History.Enabled = false` in your user config. The daemon registers a
 
 ## Failure isolation
 
-History writes are best-effort. If the database file is locked, corrupt, or inaccessible, smited logs a warning at `Warning` level and keeps running. The daemon's hot path is never coupled to history availability — recorder calls are fire-and-forget on the gRPC and panic call sites.
+History is best-effort from startup onward. If the database file is locked, corrupt, or inaccessible while the daemon initializes it, smited logs a warning at `Warning` level and continues starting. Later recorder writes follow the same rule: failures are logged and swallowed. The daemon's hot path is never coupled to history availability — recorder calls are fire-and-forget on the gRPC and panic call sites.
