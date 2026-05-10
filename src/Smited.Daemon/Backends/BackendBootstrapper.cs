@@ -139,10 +139,27 @@ internal sealed class BackendBootstrapper : IHostedService
             }
             catch (Exception ex)
             {
+                // The IBackendFactory contract: throws are
+                // user-fixable misconfiguration; environmental decline
+                // is communicated by returning null. Conflating the
+                // two would mean a typo like
+                // `Options:HeartbeatSeconds = "abc"` silently skips
+                // the backend at startup — the user gets a daemon
+                // that's missing the backend they configured, with
+                // only a log line to find. Surface factory exceptions
+                // as startup failures so the user has to fix the
+                // config.
                 _logger.LogError(ex,
                     "Factory for kind {Kind} threw while creating descriptor {Id}",
                     descriptor.Kind, descriptor.Id);
-                continue;
+                throw new InvalidOperationException(
+                    $"Backend factory for kind '{descriptor.Kind}' threw while "
+                    + $"creating descriptor '{descriptor.Id}'. The "
+                    + "IBackendFactory contract treats exceptions as "
+                    + "user-fixable misconfiguration (typically a malformed "
+                    + "value in the descriptor's Options section). See the "
+                    + "inner exception for the underlying cause.",
+                    ex);
             }
 
             if (backend is null)

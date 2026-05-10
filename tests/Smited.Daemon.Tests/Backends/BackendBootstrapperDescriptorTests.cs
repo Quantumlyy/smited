@@ -141,6 +141,32 @@ public class BackendBootstrapperDescriptorTests
     }
 
     [Fact]
+    public async Task Factory_throwing_aborts_startup_with_descriptor_context()
+    {
+        // The IBackendFactory contract: throws are user-fixable
+        // misconfiguration (e.g. malformed Options), not environmental
+        // decline. The bootstrapper must surface the throw as a
+        // startup failure rather than skipping the backend silently —
+        // otherwise a typo like Options:HeartbeatSeconds="abc" would
+        // leave the daemon running without the requested backend with
+        // only a log line as evidence.
+        var items = new[]
+        {
+            new BackendDescriptor { Kind = "throws_on_create", Id = "boom", Enabled = true },
+        };
+
+        var act = async () => await Build(
+            items,
+            extraFactories: new IBackendFactory[] { new ThrowingFactory() });
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("'throws_on_create'");
+        ex.Which.Message.Should().Contain("'boom'");
+        ex.Which.InnerException.Should().NotBeNull();
+        ex.Which.InnerException!.Message.Should().Contain("simulated config error");
+    }
+
+    [Fact]
     public async Task Empty_kind_aborts_startup()
     {
         var items = new[] { new BackendDescriptor { Id = "mock-owo" } };
@@ -255,5 +281,18 @@ public class BackendBootstrapperDescriptorTests
                 id: descriptor.Id,
                 kind: "fake_multi",
                 displayName: descriptor.DisplayName ?? descriptor.Id);
+    }
+
+    private sealed class ThrowingFactory : IBackendFactory
+    {
+        public string Kind => "throws_on_create";
+
+        public IHapticBackend? TryCreate(
+            BackendDescriptor descriptor,
+            IConfigurationSection optionsSection,
+            IServiceProvider services,
+            Microsoft.Extensions.Logging.ILogger logger) =>
+            throw new InvalidOperationException(
+                "simulated config error: HeartbeatSeconds is not a number");
     }
 }
