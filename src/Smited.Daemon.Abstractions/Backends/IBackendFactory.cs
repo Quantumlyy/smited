@@ -32,6 +32,16 @@ namespace Smited.Daemon.Backends;
 /// Public for the same reason — the OWO assembly is a separate
 /// compilation unit.
 /// </para>
+/// <para>
+/// <strong>Singleton-state factories:</strong> if the factory's
+/// backend shares state across instances — a DI singleton backend
+/// object, a static SDK, or a single hardware connection that two
+/// backends would race on — add the kind to
+/// <c>BackendDescriptorValidator.SingletonKinds</c> so the validator
+/// rejects user configurations that try to register two of them. The
+/// alternative (silent state corruption when two descriptors of the
+/// same kind both register) is far worse than the up-front error.
+/// </para>
 /// </remarks>
 public interface IBackendFactory
 {

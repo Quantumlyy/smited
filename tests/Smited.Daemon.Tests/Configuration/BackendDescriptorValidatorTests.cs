@@ -107,6 +107,55 @@ public class BackendDescriptorValidatorTests
     }
 
     [Fact]
+    public void Two_owo_skin_descriptors_are_rejected()
+    {
+        // Generalization of the mock_owo singleton rule. OwoBackend
+        // depends on a static OWOGame.OWO SDK that two instances would
+        // race on, so two owo_skin descriptors must be rejected up
+        // front.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-living-room" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-office" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors)
+            .Should().ContainSingle(e => e.Contains("Kind 'owo_skin' may appear at most once"));
+    }
+
+    [Fact]
+    public void One_mock_owo_and_one_owo_skin_descriptor_is_allowed()
+    {
+        // Different singleton kinds; not the same SDK contention.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "mock-owo" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-primary" },
+        };
+
+        BackendDescriptorValidator.Validate(descriptors).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Three_owo_skin_descriptors_emit_a_single_error_naming_first_two_indices()
+    {
+        // 3+ duplicates of the same singleton kind only emit one error
+        // (citing the first two indices). The validator's job is to
+        // tell the user "this kind is singleton-only"; piling on more
+        // messages doesn't help fix the config.
+        var descriptors = new[]
+        {
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-a" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-b" },
+            new BackendDescriptor { Kind = "owo_skin", Id = "owo-c" },
+        };
+
+        var errors = BackendDescriptorValidator.Validate(descriptors);
+
+        errors.Should().ContainSingle(e => e.Contains("'owo_skin'") && e.Contains("[0,1]"));
+    }
+
+    [Fact]
     public void Multiple_validation_failures_are_all_reported_at_once()
     {
         var descriptors = new[]
