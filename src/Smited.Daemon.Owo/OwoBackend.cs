@@ -96,12 +96,20 @@ public sealed class OwoBackend : IHapticBackend
     private long _lastSendSequence;
 
     /// <summary>
-    /// Constructed by the daemon's <c>BackendBootstrapper</c> via
-    /// <c>ActivatorUtilities.CreateInstance</c>. All collaborators are
-    /// resolved from the host DI container — <see cref="IOwoSdk"/> is
-    /// registered to <c>StaticOwoSdk</c> on Windows when
-    /// <c>EnableOwo</c> is true, otherwise this backend never gets
-    /// constructed.
+    /// Constructed by <c>OwoBackendFactory</c> via
+    /// <c>ActivatorUtilities.CreateInstance</c> when a descriptor of
+    /// kind <c>owo_skin</c> appears in
+    /// <c>SmitedOptions.BackendsOptions.Items</c>. The factory binds
+    /// <see cref="OwoBackendOptions"/> from the descriptor's
+    /// <c>Options</c> sub-section and supplies it as the first
+    /// argument; the rest of the constructor's collaborators —
+    /// <see cref="IOwoSdk"/>, <see cref="TimeProvider"/>,
+    /// <see cref="ILogger{TCategoryName}"/> — are resolved from the
+    /// host DI container. <see cref="IOwoSdk"/> is registered to
+    /// <c>StaticOwoSdk</c> on Windows hosts via the daemon's
+    /// <c>AddOwoBackendIfWindows</c> extension; non-Windows hosts
+    /// never construct this backend because the factory itself isn't
+    /// registered.
     /// </summary>
     public OwoBackend(
         OwoBackendOptions options,

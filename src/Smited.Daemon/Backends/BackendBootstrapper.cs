@@ -1,9 +1,8 @@
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Smited.Daemon.Backends.Internal;
-using Smited.Daemon.Backends.Mock;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Events;
 
@@ -15,16 +14,31 @@ namespace Smited.Daemon.Backends;
 /// synchronously in <c>StartAsync</c>. Registered before
 /// <see cref="Sensations.SensationLoader"/> in DI so the loader sees
 /// the populated registry.
-///
+/// </summary>
+/// <remarks>
+/// <para>
+/// Iterates <see cref="SmitedOptions.BackendsOptions.Items"/> and, for
+/// each entry, resolves a matching <see cref="IBackendFactory"/>
+/// (case-insensitive on <see cref="BackendDescriptor.Kind"/>) and asks
+/// it to build the backend from the descriptor and its
+/// <c>Smited:Backends:Items:{i}:Options</c> sub-section. Factories
+/// that decline (return <c>null</c>) — typically because the host OS
+/// or runtime can't host the backend — are logged and skipped without
+/// aborting startup.
+/// </para>
+/// <para>
 /// For each registered backend, also spins up a fan-out task that
 /// forwards backend lifecycle events to <see cref="EventBus"/>.
-/// </summary>
+/// </para>
+/// </remarks>
 internal sealed class BackendBootstrapper : IHostedService
 {
     private readonly BackendRegistry _registry;
     private readonly EventBus _bus;
     private readonly SmitedOptions _options;
+    private readonly IConfiguration _configuration;
     private readonly IServiceProvider _services;
+    private readonly IReadOnlyList<IBackendFactory> _factories;
     private readonly IEnumerable<IHapticBackend> _additionalBackends;
     private readonly ILogger<BackendBootstrapper> _logger;
     private readonly List<Task> _fanTasks = new();
@@ -35,80 +49,95 @@ internal sealed class BackendBootstrapper : IHostedService
         BackendRegistry registry,
         EventBus bus,
         IOptions<SmitedOptions> options,
+        IConfiguration configuration,
         IServiceProvider services,
+        IEnumerable<IBackendFactory> factories,
         IEnumerable<IHapticBackend> additionalBackends,
         ILogger<BackendBootstrapper> logger)
     {
         _registry = registry;
         _bus = bus;
         _options = options.Value;
+        _configuration = configuration;
         _services = services;
+        _factories = factories.ToArray();
         _additionalBackends = additionalBackends;
         _logger = logger;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_options.Backends.EnableMockOwo)
+        var descriptors = _options.Backends.Items;
+
+        var validationErrors = BackendDescriptorValidator.Validate(descriptors);
+        if (validationErrors.Count > 0)
         {
-            var mock = _services.GetRequiredService<MockOwoBackend>();
-            if (await RegisterAndFan(mock, cancellationToken).ConfigureAwait(false))
+            var combined = string.Join(Environment.NewLine, validationErrors);
+            throw new OptionsValidationException(
+                nameof(SmitedOptions.BackendsOptions),
+                typeof(SmitedOptions.BackendsOptions),
+                new[]
+                {
+                    "Backend descriptor configuration is invalid:" + Environment.NewLine + combined,
+                });
+        }
+
+        for (var i = 0; i < descriptors.Count; i++)
+        {
+            var descriptor = descriptors[i];
+            if (!descriptor.Enabled)
             {
-                _logger.LogInformation("Registered backend {Id} ({Kind}: {DisplayName})",
-                    mock.Id, mock.Kind, mock.DisplayName);
+                _logger.LogInformation(
+                    "Skipping disabled descriptor {Id} ({Kind})",
+                    descriptor.Id, descriptor.Kind);
+                continue;
+            }
+
+            var factory = ResolveFactory(descriptor.Kind);
+            if (factory is null)
+            {
+                _logger.LogWarning(
+                    "No factory registered for backend kind {Kind} (descriptor id {Id}); skipping",
+                    descriptor.Kind, descriptor.Id);
+                continue;
+            }
+
+            var optionsSection = _configuration.GetSection(
+                $"Smited:Backends:Items:{i}:Options");
+
+            IHapticBackend? backend;
+            try
+            {
+                backend = factory.TryCreate(descriptor, optionsSection, _services, _logger);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Factory for kind {Kind} threw while creating descriptor {Id}",
+                    descriptor.Kind, descriptor.Id);
+                continue;
+            }
+
+            if (backend is null)
+            {
+                _logger.LogInformation(
+                    "Factory for kind {Kind} declined to create descriptor {Id} "
+                    + "(likely environmental: wrong OS, missing assembly)",
+                    descriptor.Kind, descriptor.Id);
+                continue;
+            }
+
+            if (await RegisterAndFan(backend, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.LogInformation(
+                    "Registered backend {Id} ({Kind}: {DisplayName})",
+                    backend.Id, backend.Kind, backend.DisplayName);
             }
         }
 
-        if (_options.Backends.EnableOwo)
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                _logger.LogWarning("OWO backend disabled: EnableOwo=true but not running on Windows.");
-            }
-            else
-            {
-                // Type.GetType can throw FileNotFoundException /
-                // FileLoadException / TypeLoadException even with the
-                // default throwOnError=false when the assembly is
-                // present but a transitive dependency (OWO.dll) is
-                // missing or unloadable. Treat that the same as the
-                // assembly-not-found case so daemon startup doesn't
-                // crash; the user-facing remediation is the same
-                // either way (rebuild/republish to land the OWO
-                // runtime files).
-                Type? owoType;
-                try
-                {
-                    owoType = Type.GetType("Smited.Daemon.Owo.OwoBackend, Smited.Daemon.Owo");
-                    if (owoType is null)
-                    {
-                        _logger.LogWarning(
-                            "OWO backend disabled: EnableOwo=true but the Smited.Daemon.Owo assembly is not in the output directory.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "OWO backend disabled: reflective load of OwoBackend threw "
-                        + "({ExceptionType}). Likely cause: the Smited.Daemon.Owo "
-                        + "assembly is present but its OWO.dll runtime dependency "
-                        + "isn't next to it. Rebuild/republish to refresh the OWO "
-                        + "runtime files.",
-                        ex.GetType().Name);
-                    owoType = null;
-                }
-
-                if (owoType is not null)
-                {
-                    var owo = (IHapticBackend)ActivatorUtilities.CreateInstance(_services, owoType);
-                    if (await RegisterAndFan(owo, cancellationToken).ConfigureAwait(false))
-                    {
-                        _logger.LogInformation("Registered Windows OWO backend {Id}", owo.Id);
-                    }
-                }
-            }
-        }
-
+        // _additionalBackends preserves the existing test injection
+        // seam: anything registered as IHapticBackend in the DI
+        // container shows up here without needing a descriptor entry.
         foreach (var backend in _additionalBackends)
         {
             if (await RegisterAndFan(backend, cancellationToken).ConfigureAwait(false))
@@ -152,6 +181,10 @@ internal sealed class BackendBootstrapper : IHostedService
             }
         }
     }
+
+    private IBackendFactory? ResolveFactory(string kind) =>
+        _factories.FirstOrDefault(f =>
+            string.Equals(f.Kind, kind, StringComparison.OrdinalIgnoreCase));
 
     private async Task<bool> RegisterAndFan(IHapticBackend backend, CancellationToken cancellationToken)
     {

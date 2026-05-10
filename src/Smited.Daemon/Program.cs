@@ -47,23 +47,15 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
-// OwoBackend (when enabled via the legacy boolean path) is loaded
-// reflectively in BackendBootstrapper and constructed via
-// ActivatorUtilities.CreateInstance, which resolves its OwoBackendOptions
-// parameter from the container. Surfacing the nested options here lets
-// the OWO backend stay decoupled from SmitedOptions/IOptions<T>. This
-// registration is removed in the next commit when the legacy booleans
-// go away — the descriptor-driven OwoBackendFactory binds options from
-// the descriptor's Options sub-section instead.
-builder.Services.AddSingleton(sp =>
-    sp.GetRequiredService<IOptions<SmitedOptions>>().Value.Backends.Owo);
-
 // Cross-platform backend factory registrations.
 builder.Services.AddSmitedBackends();
 
 // Reflectively register OwoBackendFactory + StaticOwoSdk on Windows.
 // No-op on non-Windows; the daemon stays up and OWO triggers are
-// rejected as if the assembly were absent.
+// rejected as if the assembly were absent. The factory binds its
+// OwoBackendOptions from the descriptor's Options sub-section, so
+// the legacy SmitedOptions.Backends.Owo singleton registration is
+// no longer needed.
 builder.Services.AddOwoBackendIfWindows();
 
 // History database (daemon-internal SQLite). Registered first so the

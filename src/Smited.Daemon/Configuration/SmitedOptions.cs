@@ -43,24 +43,10 @@ public sealed class SmitedOptions
         /// names a kind and an instance id; the daemon resolves the
         /// matching <c>IBackendFactory</c> and lets it construct the
         /// backend. Per-instance configuration sits under the entry's
-        /// <c>Options</c> sub-section.
+        /// <c>Options</c> sub-section, addressed by the bootstrapper as
+        /// <c>Smited:Backends:Items:{i}:Options</c>.
         /// </summary>
-        /// <remarks>
-        /// Lands in Commit 1 alongside the legacy boolean knobs. The
-        /// bootstrapper does not consume <see cref="Items"/> until
-        /// Commit 2; Commit 1 simply makes the new shape bindable so
-        /// tests covering descriptor binding can be written.
-        /// </remarks>
         public List<BackendDescriptor> Items { get; set; } = new();
-
-        public bool EnableMockOwo { get; set; } = true;
-        public bool EnableOwo { get; set; }
-
-        /// <summary>
-        /// Configuration for the real OWO Skin backend, used when
-        /// <see cref="EnableOwo"/> is <c>true</c> on a Windows host.
-        /// </summary>
-        public OwoBackendOptions Owo { get; set; } = new();
     }
 
     public sealed class SensationsOptions
