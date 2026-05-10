@@ -131,6 +131,8 @@ JSON files under `LibraryRoot/<backend_kind>/*.json` are loaded at boot by `Sens
 
 The `IOwoSdk` interface and the `OwoSendCommand` record live in `Smited.Daemon.Abstractions` so both the daemon host and the Windows-only OWO project can reference them without anyone forcing a Mac-side compile dependency on the Windows assembly. Tests that need to construct `OwoBackend` directly (Trigger/Stop/heartbeat behavior) take a `_TargetingWindows`-gated `ProjectReference` to `Smited.Daemon.Owo` from the test csproj and are excluded from compile when not targeting Windows.
 
+`Smited.Daemon.Pishock.csproj` is the contrasting case: cross-platform HTTP, no platform-conditional MSBuild, no reflective load. The daemon takes a plain `ProjectReference` to it; both `MockPishockBackendFactory` and `PishockBackendFactory` register unconditionally via `BackendsServiceCollectionExtensions.AddSmitedBackends`. PiShock is also **multi-instance**: nothing in the descriptor validator's `SingletonKinds` set, so a user can run two `pishock` descriptors with different ids and different transports (one cloud, one LAN) in the same daemon. See [`docs/pishock.md`](docs/pishock.md) for the user-facing setup and [`docs/adding-a-backend.md`](docs/adding-a-backend.md) for the pattern.
+
 ## Things explicitly out of scope
 
 - TLS, authentication.

@@ -55,12 +55,14 @@ See [`docs/building.md`](docs/building.md) for the full Cake target list.
 - [`docs/adding-a-backend.md`](docs/adding-a-backend.md) — how to add a new `IHapticBackend` implementation, including the descriptor + factory pattern.
 - [`docs/body-map.md`](docs/body-map.md) — bodymap framework, region taxonomy, and forbidden-region semantics.
 - [`docs/owo.md`](docs/owo.md) — Windows OWO Skin setup, calibration, smoke-test runbook, TENS safety notes.
+- [`docs/pishock.md`](docs/pishock.md) — PiShock setup (cloud and LAN), AllowedOps semantics, sensation authoring, safety notes.
+- [`docs/pishock-smoke.md`](docs/pishock-smoke.md) — PiShock smoke-test runbook (scratch app + step-by-step verification).
 - [`docs/history.md`](docs/history.md) — the daemon's SQLite history database: tables, queries, retention.
 - [`sensations/README.md`](sensations/README.md) — sensation file format reference.
 
 ## Status
 
-This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. The Windows OWO Skin backend in `src/Smited.Daemon.Owo/` is wired against the official OWO C# SDK — see [`docs/owo.md`](docs/owo.md) for setup, the smoke-test runbook, and TENS safety notes. The daemon is LAN/localhost only — no TLS, no auth.
+This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. Two real backends ship today: the Windows-only OWO Skin backend in `src/Smited.Daemon.Owo/` (wired against the official OWO C# SDK — see [`docs/owo.md`](docs/owo.md)) and the cross-platform PiShock backend in `src/Smited.Daemon.Pishock/` with cloud and LAN transports (see [`docs/pishock.md`](docs/pishock.md) and the smoke-test runbook). The daemon is LAN/localhost only — no TLS, no auth.
 
 ## License
 

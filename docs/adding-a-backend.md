@@ -129,7 +129,7 @@ A backend kind is a **singleton kind** when its factory's underlying state can't
 - **`mock_owo`** — registered as a DI singleton so `IMockOwoController` (used by tests and the future control surface) has a stable target. A second descriptor of the same kind would compete for the same instance's `OverrideId` / `OverrideDisplayName` overrides.
 - **`owo_skin`** — depends on a process-wide static `IOwoSdk`. The OWO SDK binds to one suit per process; two enabled `owo_skin` descriptors would race on `Send` / `Stop` and the device would fire whatever the most recent caller asked for.
 
-If you're adding a new backend kind whose factory shares state across instances (process-wide SDK, single hardware connection, file lock), add the kind to `SingletonKinds` so the validator catches misconfigurations up-front. Most new kinds are **not** singletons — bHaptics and PiShock both support multi-instance operation because each device has its own connection state, and the daemon should let users register one descriptor per device.
+If you're adding a new backend kind whose factory shares state across instances (process-wide SDK, single hardware connection, file lock), add the kind to `SingletonKinds` so the validator catches misconfigurations up-front. Most new kinds are **not** singletons — `pishock` is the in-tree reference: each shocker has its own share code or device IP, its own `AllowedOps`, its own rate limiter, so two enabled `pishock` descriptors register two independent backends without conflict. See `src/Smited.Daemon.Pishock/PishockBackendFactory.cs` for the worked factory and [`docs/pishock.md`](pishock.md) for the user-facing setup.
 
 For non-singleton kinds: implement `TryCreate` so it issues a fresh `IHapticBackend` per call (`ActivatorUtilities.CreateInstance` does this naturally — its returned object isn't shared across calls). The factory itself stays a DI singleton; only the backends it produces are transient.
 
@@ -149,6 +149,18 @@ The bodymap validator refuses to register the backend at startup if a declared p
 Drop a `sensations/<your_kind>/*.json` directory at the repo root (or wherever `Smited:Sensations:LibraryRoot` points). At boot, `SensationLoader` picks up files whose `backend_kind` matches the backend's `Kind` field. Files with the default `scope: "kind"` bind to every backend instance of that kind; files with `scope: "id"` bind only to their `backend_id` and are skipped if that backend is absent. Schema validation (parameter types, ranges, required fields, zone IDs) runs against each target backend's `ParameterSchema` and `ZoneTopology` before the daemon finishes starting; a failing file aborts startup with the path and offending field.
 
 If the backend should accept runtime registrations via the `RegisterSensation` RPC, advertise the `sensation_registry_mutable` capability tag. Runtime registrations are written to `LibraryRoot/<your_kind>/<name>.json` with `scope: "id"` and `backend_id` set to the backend that accepted the request — they survive across daemon restarts without leaking onto sibling backends of the same kind. Authored files can omit `scope` to keep the broader kind-level behavior.
+
+## Cross-platform backends (worked example)
+
+`Smited.Daemon.Pishock` is the reference cross-platform backend. It's an HTTP-only family — cloud and LAN transports both — so no platform-conditional MSBuild applies. The shape:
+
+1. **`src/Smited.Daemon.Pishock/Smited.Daemon.Pishock.csproj`** — plain `<TargetFramework>net9.0</TargetFramework>`, references `Smited.Daemon.Abstractions`, no `_TargetingWindows` gates.
+2. The daemon's `Smited.Daemon.csproj` takes a plain `ProjectReference` to it (no `ReferenceOutputAssembly=false` reflective dance like OWO needs).
+3. `BackendsServiceCollectionExtensions.AddSmitedBackends` registers both `MockPishockBackendFactory` and `PishockBackendFactory` unconditionally — descriptors that don't match leave them idle in DI.
+4. The mock backend's `Kind` is `"pishock"` (same as the real backend), so sensations under `sensations/pishock/` bind to both real and mock instances without a separate `sensations/mock_pishock/` directory. The factory's `Kind` (the descriptor selector — `"mock_pishock"` vs `"pishock"`) is distinct from the resulting backend's `Kind` (the hardware family). This mirrors the OWO pattern (`mock_owo` factory → `owo_skin` backend).
+5. The mock and real backends share `Internal/PishockDescriptors`, `Internal/PishockTriggerValidator`, and `Internal/MicrosensationReader` so identical constraints come from one source.
+
+Use this pattern for any new backend that doesn't need a platform-specific SDK or an OS-conditional NuGet package.
 
 ## Platform-conditional backends (Windows-only example)
 
