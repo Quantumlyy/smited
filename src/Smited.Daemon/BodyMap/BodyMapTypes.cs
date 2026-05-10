@@ -1,7 +1,7 @@
 namespace Smited.Daemon.BodyMap;
 
 /// <summary>
-/// Outcome of <see cref="BodyMapValidator.Validate"/>: every error
+/// Outcome of <see cref="BodyMapValidator"/>: every error
 /// (severity-graded by <see cref="BodyMapErrorKind"/>), every warning,
 /// and the forward / inverse / per-zone indices the trigger-time
 /// overlap check needs.
@@ -30,11 +30,13 @@ internal sealed record BodyMapValidationResult(
 
 /// <summary>
 /// One placement-level error. <see cref="Kind"/> drives whether the
-/// bootstrapper deregisters the offending backend
-/// (<see cref="BodyMapErrorKind.ManufacturerForbidden"/> /
-/// <see cref="BodyMapErrorKind.SmitedDefaultForbidden"/>) or aborts
-/// startup outright (<see cref="BodyMapErrorKind.UnknownBackend"/> /
-/// <see cref="BodyMapErrorKind.UnknownZone"/>).
+/// bootstrapper aborts startup. All kinds except
+/// <see cref="BodyMapErrorKind.BackendDeclined"/> are fatal — the
+/// daemon refuses to start until the user fixes the configuration.
+/// <see cref="BodyMapErrorKind.BackendDeclined"/> is environmental
+/// (e.g. an OWO descriptor on a Mac host) and surfaces as a warning;
+/// the daemon starts with the declared-but-declined backend simply
+/// absent.
 /// </summary>
 internal sealed record BodyMapError(
     string BackendId,
@@ -47,27 +49,42 @@ internal enum BodyMapErrorKind
 {
     /// <summary>
     /// Placement lands in the backend's manufacturer-mandated forbidden
-    /// list. Non-overridable; the backend gets deregistered.
+    /// list. Non-overridable; fatal — the user must remove or relocate
+    /// the placement.
     /// </summary>
     ManufacturerForbidden,
 
     /// <summary>
     /// Placement lands in <c>SmitedDefaultForbiddenRegions</c> and the
     /// user has not added the region to <c>AllowOverrideRegions</c>.
-    /// Overridable.
+    /// Fatal until the user opts out of the default or relocates the
+    /// placement.
     /// </summary>
     SmitedDefaultForbidden,
 
     /// <summary>
-    /// Placement.BackendId does not match any registered backend.
-    /// User-fixable typo; aborts startup.
+    /// Placement references a backend id that is not declared in any
+    /// <see cref="Configuration.BackendDescriptor"/> entry. Configuration
+    /// mistake (typically a typo); fatal — the user must fix the id and
+    /// restart. The error message includes a "did you mean" list of the
+    /// declared ids.
     /// </summary>
     UnknownBackend,
 
     /// <summary>
+    /// Placement references a backend id that IS declared but whose
+    /// factory declined to create the backend (wrong host OS, missing
+    /// SDK assembly, etc.). Environmental, not a configuration error.
+    /// Surfaced as a warning; the placement is skipped and daemon
+    /// startup continues. Distinct from
+    /// <see cref="UnknownBackend"/> so a user running an OWO-targeting
+    /// configuration on Mac doesn't have their daemon refuse to start.
+    /// </summary>
+    BackendDeclined,
+
+    /// <summary>
     /// Placement.ZoneIds contains an id that is neither a leaf zone
-    /// nor a group on the named backend. User-fixable typo; aborts
-    /// startup.
+    /// nor a group on the named backend. User-fixable typo; fatal.
     /// </summary>
     UnknownZone,
 }

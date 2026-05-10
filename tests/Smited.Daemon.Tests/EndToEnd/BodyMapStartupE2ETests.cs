@@ -77,8 +77,7 @@ public class BodyMapStartupE2ETests
         // MockOwoBackend.ForbiddenRegions is empty, so the only relevant
         // check is the smited-default list (Face / Throat / Pelvis /
         // ChestOverHeart). LeftUpperArm is in neither. The backend
-        // stays registered, the bodymap reports one placement, no
-        // refusals.
+        // stays registered, the bodymap reports one placement.
         using var fixture = new DaemonFixture(additionalConfig: new Dictionary<string, string?>
         {
             ["Smited:BodyMap:Placements:0:BackendId"] = "mock-owo",
@@ -88,47 +87,70 @@ public class BodyMapStartupE2ETests
 
         fixture.Registry.Count.Should().Be(1);
         fixture.Registry.TryGet("mock-owo").Should().NotBeNull();
-        fixture.BodyMapState.RefusedBackendCount.Should().Be(0);
         fixture.BodyMapState.PlacementCount.Should().Be(1);
     }
 
     [Fact]
-    public void Placement_on_Face_deregisters_the_backend_and_marks_it_refused()
+    public void Placement_on_Face_aborts_startup()
     {
         // Face is in SmitedDefaultForbiddenRegions and the user has not
-        // opted out. The validator reports the error, the bootstrapper
-        // deregisters mock-owo, and IBodyMapState.RefusedBackendCount
-        // (which the startup banner reads to render the "(N refused)"
-        // suffix) reflects the rejection.
-        using var fixture = new DaemonFixture(additionalConfig: new Dictionary<string, string?>
+        // opted out. Forbidden-region errors are now fatal-throw rather
+        // than deregister-and-continue: the daemon refuses to start
+        // until the user fixes the placement.
+        var act = () => new DaemonFixture(additionalConfig: new Dictionary<string, string?>
         {
             ["Smited:BodyMap:Placements:0:BackendId"] = "mock-owo",
             ["Smited:BodyMap:Placements:0:ZoneIds:0"] = "pectoral_l",
             ["Smited:BodyMap:Placements:0:Region"] = "Face",
         });
 
-        fixture.Registry.Count.Should().Be(0);
-        fixture.Registry.TryGet("mock-owo").Should().BeNull();
-        fixture.BodyMapState.RefusedBackendCount.Should().Be(1);
-        fixture.BodyMapState.PlacementCount.Should().Be(1);
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("Body map has");
     }
 
     [Fact]
-    public void Placement_on_ChestOverHeart_without_override_deregisters_the_backend()
+    public void Placement_on_ChestOverHeart_without_override_aborts_startup()
     {
-        // ChestOverHeart is in SmitedDefaultForbiddenRegions and inherits
-        // forbiddenness through RegionHierarchy from any future ban on
-        // ChestFront. With no AllowOverrideRegions the placement is
-        // refused.
-        using var fixture = new DaemonFixture(additionalConfig: new Dictionary<string, string?>
+        // ChestOverHeart is in SmitedDefaultForbiddenRegions; with no
+        // AllowOverrideRegions the placement is fatal.
+        var act = () => new DaemonFixture(additionalConfig: new Dictionary<string, string?>
         {
             ["Smited:BodyMap:Placements:0:BackendId"] = "mock-owo",
             ["Smited:BodyMap:Placements:0:ZoneIds:0"] = "pectoral_l",
             ["Smited:BodyMap:Placements:0:Region"] = "ChestOverHeart",
         });
 
-        fixture.Registry.Count.Should().Be(0);
-        fixture.BodyMapState.RefusedBackendCount.Should().Be(1);
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Placement_for_declared_but_declined_backend_does_not_abort_startup()
+    {
+        // Mac-style scenario: user has an owo_skin descriptor, but the
+        // OWO factory isn't registered (no Windows OS or no SDK
+        // assembly). The placement targets owo-primary; it should be
+        // logged as a warning, not block startup. mock-owo (the
+        // synthesized default isn't suppressed because owo-primary's
+        // descriptor is non-empty Items, but a placement against the
+        // declined OWO backend still doesn't kill the daemon).
+        using var fixture = new DaemonFixture(additionalConfig: new Dictionary<string, string?>
+        {
+            ["Smited:Backends:Items:0:Kind"] = "mock_owo",
+            ["Smited:Backends:Items:0:Id"] = "mock-owo",
+            ["Smited:Backends:Items:0:Enabled"] = "true",
+            ["Smited:Backends:Items:1:Kind"] = "owo_skin",
+            ["Smited:Backends:Items:1:Id"] = "owo-primary",
+            ["Smited:Backends:Items:1:Enabled"] = "true",
+            ["Smited:BodyMap:Placements:0:BackendId"] = "owo-primary",
+            ["Smited:BodyMap:Placements:0:ZoneIds:0"] = "pectoral_l",
+            ["Smited:BodyMap:Placements:0:Region"] = "LeftUpperArm",
+        });
+
+        // OWO factory declines on Mac (the test is running on Mac);
+        // mock-owo registers as configured.
+        fixture.Registry.Count.Should().Be(1);
+        fixture.Registry.TryGet("mock-owo").Should().NotBeNull();
+        fixture.Registry.TryGet("owo-primary").Should().BeNull();
     }
 
     [Fact]
@@ -180,7 +202,6 @@ public class BodyMapStartupE2ETests
 
         fixture.Registry.Count.Should().Be(1);
         fixture.Registry.TryGet("mock-owo").Should().NotBeNull();
-        fixture.BodyMapState.RefusedBackendCount.Should().Be(0);
         fixture.BodyMapState.PlacementCount.Should().Be(1);
     }
 }

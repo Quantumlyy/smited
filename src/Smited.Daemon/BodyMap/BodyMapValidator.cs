@@ -13,17 +13,55 @@ namespace Smited.Daemon.BodyMap;
 internal sealed class BodyMapValidator
 {
     /// <summary>
-    /// Validate placements against registered backends. The
-    /// bootstrapper consumes the result: forbidden-region errors
-    /// drive backend deregistration, unknown-backend / unknown-zone
-    /// errors abort startup, warnings log at WARN level.
+    /// Convenience overload that treats every registered backend as
+    /// also-declared. Useful for unit tests that don't exercise the
+    /// declined-vs-typo distinction; production code uses the three-arg
+    /// overload so a placement targeting a declared-but-declined backend
+    /// surfaces as <see cref="BodyMapErrorKind.BackendDeclined"/> rather
+    /// than as a fatal <see cref="BodyMapErrorKind.UnknownBackend"/>.
     /// </summary>
     public BodyMapValidationResult Validate(
         IReadOnlyCollection<IHapticBackend> backends,
         BodyMapOptions options)
     {
         ArgumentNullException.ThrowIfNull(backends);
+        return Validate(backends, backends.Select(b => b.Id).ToArray(), options);
+    }
+
+    /// <summary>
+    /// Validate placements against registered backends. The bootstrapper
+    /// consumes the result: every error kind except
+    /// <see cref="BodyMapErrorKind.BackendDeclined"/> is fatal-throw;
+    /// <see cref="BodyMapErrorKind.BackendDeclined"/> logs at WARN and
+    /// startup continues. Warnings (overlap detection) log at WARN.
+    /// </summary>
+    /// <param name="backends">
+    /// Backends actually registered in <c>BackendRegistry</c> after
+    /// every factory has run. Subset of <paramref name="allDeclaredBackendIds"/>:
+    /// declared backends whose factory returned <c>null</c> are absent
+    /// from this collection.
+    /// </param>
+    /// <param name="allDeclaredBackendIds">
+    /// Every backend id the user declared in
+    /// <c>Smited:Backends:Items</c> (post-synthesis of the
+    /// empty-Items default). Lets the validator distinguish a placement
+    /// for a declared-but-declined backend (warn) from a placement
+    /// whose backend id is a typo (fatal). The daemon would otherwise
+    /// refuse to start on every Mac whose user has an
+    /// <c>owo_skin</c> descriptor.
+    /// </param>
+    /// <param name="options">User-supplied bodymap configuration.</param>
+    public BodyMapValidationResult Validate(
+        IReadOnlyCollection<IHapticBackend> backends,
+        IReadOnlyCollection<string> allDeclaredBackendIds,
+        BodyMapOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(backends);
+        ArgumentNullException.ThrowIfNull(allDeclaredBackendIds);
         ArgumentNullException.ThrowIfNull(options);
+
+        var declaredBackendIds = allDeclaredBackendIds
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var errors = new List<BodyMapError>();
         var warnings = new List<BodyMapWarning>();
@@ -58,12 +96,33 @@ internal sealed class BodyMapValidator
         {
             if (!backendById.TryGetValue(placement.BackendId, out var backend))
             {
-                errors.Add(new BodyMapError(
-                    placement.BackendId,
-                    ZoneId: "",
-                    placement.Region,
-                    BodyMapErrorKind.UnknownBackend,
-                    $"Placement references backend '{placement.BackendId}' which is not registered."));
+                if (declaredBackendIds.Contains(placement.BackendId))
+                {
+                    // Backend was declared but its factory declined to
+                    // register it. Environmental, not a config error.
+                    errors.Add(new BodyMapError(
+                        placement.BackendId,
+                        ZoneId: "",
+                        placement.Region,
+                        BodyMapErrorKind.BackendDeclined,
+                        $"Placement for '{placement.BackendId}' skipped: backend "
+                        + "declared in Smited:Backends:Items but its factory declined "
+                        + "to register it (typically wrong host OS or missing SDK "
+                        + "runtime files)."));
+                }
+                else
+                {
+                    var hint = declaredBackendIds.Count > 0
+                        ? $" Did you mean one of: {string.Join(", ", declaredBackendIds.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))}?"
+                        : " No backends are declared in Smited:Backends:Items.";
+                    errors.Add(new BodyMapError(
+                        placement.BackendId,
+                        ZoneId: "",
+                        placement.Region,
+                        BodyMapErrorKind.UnknownBackend,
+                        $"Placement references backend '{placement.BackendId}' which is "
+                        + "not declared in Smited:Backends:Items." + hint));
+                }
                 continue;
             }
 

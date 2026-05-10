@@ -26,12 +26,6 @@ internal interface IBodyMapState
     OverlapPolicy OverlapPolicy { get; }
 
     /// <summary>
-    /// Number of backends the bootstrapper deregistered because of
-    /// forbidden-region errors. Surfaced on the startup banner.
-    /// </summary>
-    int RefusedBackendCount { get; }
-
-    /// <summary>
     /// Total declared placements (after the validator collapsed
     /// invalid entries). Surfaced on the startup banner.
     /// </summary>
@@ -70,8 +64,6 @@ internal sealed class BodyMapState : IBodyMapState
 
     public OverlapPolicy OverlapPolicy { get; private set; } = OverlapPolicy.Warn;
 
-    public int RefusedBackendCount { get; private set; }
-
     public int PlacementCount { get; private set; }
 
     public int WarningCount { get; private set; }
@@ -87,19 +79,20 @@ internal sealed class BodyMapState : IBodyMapState
 
     /// <summary>
     /// Called by <c>BackendBootstrapper</c> exactly once during
-    /// startup, after the validator runs and refused backends have
-    /// been deregistered.
+    /// startup, after the validator runs. Forbidden-region errors are
+    /// now fatal-throw rather than deregister-and-continue, so by the
+    /// time this runs the body map is either valid (or only contains
+    /// non-fatal <see cref="BodyMapErrorKind.BackendDeclined"/>
+    /// warnings).
     /// </summary>
     public void Initialize(
         BodyMapValidationResult result,
         OverlapPolicy policy,
-        int placementCount,
-        int refusedBackendCount)
+        int placementCount)
     {
         ArgumentNullException.ThrowIfNull(result);
         OverlapPolicy = policy;
         PlacementCount = placementCount;
-        RefusedBackendCount = refusedBackendCount;
         WarningCount = result.Warnings.Count;
         RegionsByBackend = result.RegionsByBackend;
         BackendsByRegion = result.BackendsByRegion;

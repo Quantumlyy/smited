@@ -174,84 +174,66 @@ internal sealed class BackendBootstrapper : IHostedService
             }
         }
 
-        await ValidateBodyMapAsync().ConfigureAwait(false);
+        ValidateBodyMap(descriptors);
     }
 
-    private async Task ValidateBodyMapAsync()
+    private void ValidateBodyMap(IReadOnlyList<BackendDescriptor> descriptors)
     {
         var bodyMap = _options.BodyMap;
-        var initial = _bodyMapValidator.Validate(_registry.All, bodyMap);
 
-        // UnknownBackend / UnknownZone are user typos; abort startup so
-        // the user fixes them at once rather than silently coexisting.
-        var fatal = initial.Errors
-            .Where(e => e.Kind is BodyMapErrorKind.UnknownBackend or BodyMapErrorKind.UnknownZone)
-            .ToList();
-        if (fatal.Count > 0)
+        // declaredIds includes the synthesized default (when Items was
+        // empty) so a placement targeting "mock-owo" against the
+        // synthesized default reaches the registered branch and a
+        // "did you mean" suggestion list isn't empty in the
+        // empty-Items case. Disabled descriptors are excluded — a
+        // placement targeting a disabled backend is stale config and
+        // surfaces as UnknownBackend.
+        var declaredIds = descriptors
+            .Where(d => d.Enabled)
+            .Select(d => d.Id)
+            .ToArray();
+
+        var result = _bodyMapValidator.Validate(_registry.All, declaredIds, bodyMap);
+
+        // Every error kind except BackendDeclined is fatal. BackendDeclined
+        // is environmental (e.g. an OWO descriptor on a Mac host whose
+        // factory returned null); the placement is skipped and startup
+        // continues. The fatal/warning split is expressed declaratively
+        // here rather than nesting conditionals inside the loop.
+        var fatalErrors = result.Errors
+            .Where(e => e.Kind != BodyMapErrorKind.BackendDeclined)
+            .ToArray();
+        var declined = result.Errors
+            .Where(e => e.Kind == BodyMapErrorKind.BackendDeclined)
+            .ToArray();
+
+        foreach (var error in fatalErrors)
         {
-            throw new OptionsValidationException(
-                nameof(SmitedOptions.BodyMap),
-                typeof(BodyMapOptions),
-                fatal.Select(e => e.Message));
-        }
-
-        // Forbidden-region errors get the offending backend deregistered.
-        // Manufacturer errors are non-overridable; smited-default errors
-        // could be overridden by AllowOverrideRegions but we already
-        // accounted for that inside the validator (those don't surface
-        // when the override is set), so reaching here means refusal.
-        var refusedIds = initial.Errors
-            .Where(e => e.Kind is BodyMapErrorKind.ManufacturerForbidden
-                or BodyMapErrorKind.SmitedDefaultForbidden)
-            .Select(e => e.BackendId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var error in initial.Errors)
-        {
-            _logger.LogError(
-                "Bodymap rejection [{Kind}]: {Message}",
+            _logger.LogError("Body map error [{Kind}]: {Message}",
                 error.Kind, error.Message);
         }
-
-        foreach (var refusedId in refusedIds)
+        foreach (var warn in declined)
         {
-            if (_registry.Deregister(refusedId))
-            {
-                var refused = _registered.Find(b => string.Equals(b.Id, refusedId, StringComparison.OrdinalIgnoreCase));
-                if (refused is not null)
-                {
-                    _registered.Remove(refused);
-                    try
-                    {
-                        await refused.DisposeAsync().ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex,
-                            "Backend {BackendId} threw while disposing after bodymap refusal", refusedId);
-                    }
-                }
-            }
+            _logger.LogWarning("{Message}", warn.Message);
         }
 
-        // Re-run validation against the survivors so the persisted state
-        // reflects the post-refusal world. The first pass's warnings
-        // could still mention refused backends; re-running yields the
-        // accurate overlap picture for the trigger-time check.
-        var finalResult = refusedIds.Count > 0
-            ? _bodyMapValidator.Validate(_registry.All, bodyMap)
-            : initial;
+        if (fatalErrors.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"Body map has {fatalErrors.Length} fatal "
+                + $"error{(fatalErrors.Length == 1 ? "" : "s")}; refusing to start. "
+                + "See preceding error logs.");
+        }
 
-        foreach (var warning in finalResult.Warnings)
+        foreach (var warning in result.Warnings)
         {
             _logger.LogWarning("Bodymap overlap: {Message}", warning.Message);
         }
 
         _bodyMapState.Initialize(
-            finalResult,
+            result,
             bodyMap.OverlapPolicy,
-            placementCount: bodyMap.Placements.Count,
-            refusedBackendCount: refusedIds.Count);
+            placementCount: bodyMap.Placements.Count);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

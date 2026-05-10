@@ -28,11 +28,7 @@ internal static class StartupBanner
             "[aquamarine1]Panic[/]",
             $"[red1]POST http://{options.BindAddress}:{options.PanicPort}/panic[/]");
 
-        var refusedSuffix = bodyMapState.RefusedBackendCount > 0
-            ? $" ({bodyMapState.RefusedBackendCount} refused)"
-            : string.Empty;
-        grid.AddRow("[aquamarine1]Backends[/]",
-            $"[gold1]{backendCount} registered{refusedSuffix}[/]");
+        grid.AddRow("[aquamarine1]Backends[/]", $"[gold1]{backendCount} registered[/]");
 
         grid.AddRow("[aquamarine1]Body map[/]", FormatBodyMap(bodyMapState));
 

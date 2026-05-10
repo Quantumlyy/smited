@@ -307,6 +307,96 @@ public class BodyMapValidatorTests
     }
 
     [Fact]
+    public void Placement_for_declared_but_declined_backend_is_BackendDeclined()
+    {
+        // Backend is declared in Items but its factory declined to
+        // register it (e.g. owo_skin descriptor on a Mac host). The
+        // placement targets it; that should be a non-fatal warning,
+        // NOT a fatal UnknownBackend error.
+        var registered = new[] { MakeFake("mock-owo", zones: ["pectoral_l"]) };
+        var declared = new[] { "mock-owo", "owo-primary" }; // owo declined
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "owo-primary",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(registered, declared, options);
+
+        result.Errors.Should().Contain(e => e.Kind == BodyMapErrorKind.BackendDeclined);
+        result.Errors.Should().NotContain(e => e.Kind == BodyMapErrorKind.UnknownBackend);
+    }
+
+    [Fact]
+    public void Placement_for_undeclared_backend_is_UnknownBackend_with_did_you_mean_hint()
+    {
+        // Backend id is a typo: "owo-pirmary" instead of "owo-primary".
+        // It's not registered AND not declared → UnknownBackend, fatal.
+        // The error message lists the declared ids so the user knows
+        // what to fix.
+        var registered = new[] { MakeFake("mock-owo", zones: ["pectoral_l"]) };
+        var declared = new[] { "mock-owo", "owo-primary" };
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "owo-pirmary",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(registered, declared, options);
+
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.Kind.Should().Be(BodyMapErrorKind.UnknownBackend);
+        error.Message.Should().Contain("Did you mean");
+        error.Message.Should().Contain("owo-primary");
+    }
+
+    [Fact]
+    public void Unknown_backend_with_no_declared_ids_omits_did_you_mean_list()
+    {
+        // Edge case: Items is empty AND a placement references some id.
+        // The "did you mean" hint should degrade gracefully rather than
+        // emitting "Did you mean one of: ".
+        var registered = Array.Empty<IHapticBackend>();
+        var declared = Array.Empty<string>();
+
+        var options = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "ghost",
+                    ZoneIds = { "z" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(registered, declared, options);
+
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.Kind.Should().Be(BodyMapErrorKind.UnknownBackend);
+        error.Message.Should().NotContain("Did you mean");
+        error.Message.Should().Contain("No backends are declared");
+    }
+
+    [Fact]
     public void Unknown_zone_id_produces_an_unknown_zone_error()
     {
         var backend = MakeFake("vest", zones: ["pectoral_l"]);

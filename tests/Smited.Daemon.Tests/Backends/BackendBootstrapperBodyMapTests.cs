@@ -18,7 +18,7 @@ namespace Smited.Daemon.Tests.Backends;
 public class BackendBootstrapperBodyMapTests
 {
     [Fact]
-    public async Task Backend_with_smited_default_forbidden_zone_is_deregistered()
+    public async Task Smited_default_forbidden_placement_aborts_startup()
     {
         var bodyMap = new BodyMapOptions
         {
@@ -33,10 +33,11 @@ public class BackendBootstrapperBodyMapTests
             },
         };
 
-        await using var sys = await Build(bodyMap);
+        var act = async () => await Build(bodyMap);
 
-        sys.Registry.Count.Should().Be(0);
-        sys.BodyMapState.RefusedBackendCount.Should().Be(1);
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("Body map has");
+        ex.Which.Message.Should().Contain("fatal");
     }
 
     [Fact]
@@ -59,16 +60,16 @@ public class BackendBootstrapperBodyMapTests
         await using var sys = await Build(bodyMap);
 
         sys.Registry.Count.Should().Be(1);
-        sys.BodyMapState.RefusedBackendCount.Should().Be(0);
     }
 
     [Fact]
-    public async Task Backend_with_manufacturer_forbidden_zone_is_deregistered_even_with_override_set()
+    public async Task Manufacturer_forbidden_placement_aborts_startup_even_with_override_set()
     {
         var bodyMap = new BodyMapOptions
         {
             // Override the smited default; the backend's own forbidden
-            // list still wins.
+            // list still wins, and now wins fatally rather than via
+            // deregister-and-continue.
             AllowOverrideRegions = { BodyRegion.Face },
             Placements =
             {
@@ -81,10 +82,9 @@ public class BackendBootstrapperBodyMapTests
             },
         };
 
-        await using var sys = await Build(bodyMap, manufacturerForbidden: BodyRegion.Face);
+        var act = async () => await Build(bodyMap, manufacturerForbidden: BodyRegion.Face);
 
-        sys.Registry.Count.Should().Be(0);
-        sys.BodyMapState.RefusedBackendCount.Should().Be(1);
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
@@ -105,8 +105,47 @@ public class BackendBootstrapperBodyMapTests
 
         var act = async () => await Build(bodyMap);
 
-        var ex = await act.Should().ThrowAsync<OptionsValidationException>();
-        ex.Which.Failures.Should().Contain(s => s.Contains("'ghost'"));
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Placement_for_declared_but_declined_backend_is_a_warning_not_a_failure()
+    {
+        // The harness backend is registered in the test's
+        // additionalBackends DI seam; "owo-primary" is declared in
+        // Items but its factory declines (no factory registered for
+        // owo_skin in this test). The placement targets owo-primary;
+        // BackendDeclined is non-fatal, so the daemon starts.
+        var bodyMap = new BodyMapOptions
+        {
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "owo-primary",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftUpperArm,
+                },
+            },
+        };
+
+        await using var sys = await Build(
+            bodyMap,
+            extraDescriptors: new[]
+            {
+                new BackendDescriptor
+                {
+                    Kind = "owo_skin",
+                    Id = "owo-primary",
+                    Enabled = true,
+                },
+            });
+
+        // harness is registered (via additionalBackends), owo-primary
+        // is not (no factory for owo_skin in this test).
+        sys.Registry.Count.Should().Be(1);
+        sys.Registry.TryGet("harness").Should().NotBeNull();
+        sys.Registry.TryGet("owo-primary").Should().BeNull();
     }
 
     [Fact]
@@ -137,14 +176,14 @@ public class BackendBootstrapperBodyMapTests
         });
 
         sys.Registry.Count.Should().Be(2);
-        sys.BodyMapState.RefusedBackendCount.Should().Be(0);
         sys.BodyMapState.WarningCount.Should().Be(1);
     }
 
     private static async Task<TestSystem> Build(
         BodyMapOptions bodyMap,
         BodyRegion? manufacturerForbidden = null,
-        IEnumerable<IHapticBackend>? additionalBackends = null)
+        IEnumerable<IHapticBackend>? additionalBackends = null,
+        IReadOnlyList<BackendDescriptor>? extraDescriptors = null)
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero));
         var sink = new RecordingEventSink();
@@ -160,7 +199,23 @@ public class BackendBootstrapperBodyMapTests
         };
 
         var configuration = new ConfigurationBuilder().Build();
-        var options = Options.Create(new SmitedOptions { BodyMap = bodyMap });
+        var options = Options.Create(new SmitedOptions
+        {
+            BodyMap = bodyMap,
+            Backends = new SmitedOptions.BackendsOptions
+            {
+                // extraDescriptors gives a test the ability to declare
+                // backends without registering them — used to exercise
+                // the BackendDeclined path. The `harness` backend is
+                // injected via additionalBackends and not represented
+                // by a descriptor; that's fine — the validator's
+                // declaredIds includes only descriptor ids and the
+                // additionalBackends seam is below the descriptor
+                // path entirely (it's the existing test injection
+                // mechanism for ad-hoc IHapticBackend instances).
+                Items = extraDescriptors?.ToList() ?? new List<BackendDescriptor>(),
+            },
+        });
 
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(time);
