@@ -439,7 +439,7 @@ public sealed class OwoBackend : IHapticBackend
                     linked.Token.ThrowIfCancellationRequested();
 
                     var micro = request.Microsensations[i];
-                    mySequence = SendAndStamp(BuildSendCommand(micro, request));
+                    mySequence = SendAndStamp(BuildSendCommand(micro, request), linked.Token);
 
                     if (i < request.Microsensations.Count - 1)
                     {
@@ -532,12 +532,14 @@ public sealed class OwoBackend : IHapticBackend
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // Snapshot the playbacks we're going to cancel BEFORE issuing
-        // StopAuthoritatively — that way the sequence bump lands while
-        // every targeted playback is still in flight, so when their
-        // OCE catch eventually fires StopIfStillLatest will see a
-        // stale sequence and stand down. Cancelling the CTSes first
-        // would race the catch against the bump.
+        // Snapshot the playbacks we're going to cancel, then hand the
+        // whole list to StopAuthoritatively which silences the device,
+        // bumps _lastSendSequence, AND cancels every CTS — all under
+        // a single _sdkSync acquisition. The atomic critical section
+        // closes the race where a playback's SendAndStamp could slip
+        // between the bump and the cancel: any playback waiting on the
+        // lock during StopAuthoritatively observes the cancelled token
+        // when it acquires the lock and aborts before touching the SDK.
         var stopped = 0;
         var toCancel = new List<ActivePlayback>();
 
@@ -561,17 +563,7 @@ public sealed class OwoBackend : IHapticBackend
 
         if (stopped > 0)
         {
-            // StopAuthoritatively silences the device AND bumps
-            // _lastSendSequence under _sdkSync. Doing this BEFORE
-            // cancelling each CTS guarantees that when each playback's
-            // OCE catch runs, its captured sequence is already stale —
-            // the catch's StopIfStillLatest returns false and the
-            // "exactly one Stop per StopAsync" contract holds.
-            StopAuthoritatively();
-            foreach (var playback in toCancel)
-            {
-                SafeCancel(playback.Cts);
-            }
+            StopAuthoritatively(toCancel);
         }
 
         return Task.FromResult(stopped);
@@ -612,18 +604,19 @@ public sealed class OwoBackend : IHapticBackend
         // channel before TryComplete shuts the writer below.
         var snapshot = _activeSensations.Values.ToArray();
 
-        // Authoritatively stop the device AND bump the send sequence so
-        // any playback's OCE catch sees a stale captured sequence and
-        // StopIfStillLatest returns false. Issuing this even when there
-        // are no in-flight playbacks gives a disposed backend a
-        // guaranteed-silent device on the way out, and keeps every
-        // _sdk.Stop() call in this file routed through the three named
-        // helpers (SendAndStamp / StopIfStillLatest / StopAuthoritatively).
-        StopAuthoritatively();
-        foreach (var playback in snapshot)
-        {
-            SafeCancel(playback.Cts);
-        }
+        // Authoritatively stop the device, bump the send sequence, and
+        // cancel each playback's CTS atomically under _sdkSync. Holding
+        // the lock through the cancel — instead of bumping then
+        // cancelling separately — closes the race where a playback's
+        // SendAndStamp could land between the bump and the CTS cancel
+        // and briefly reactivate the device. SendAndStamp re-checks
+        // its CancellationToken under the same lock, so any playback
+        // already waiting on the lock observes the cancelled token
+        // when it acquires the lock and aborts before issuing Send.
+        // Empty snapshot is fine: the call still issues a final Stop
+        // on the device for shutdown safety and keeps every
+        // _sdk.Stop() routed through the three named helpers.
+        StopAuthoritatively(snapshot);
 
         foreach (var playback in snapshot)
         {
@@ -885,22 +878,31 @@ public sealed class OwoBackend : IHapticBackend
 
     /// <summary>
     /// Sends <paramref name="command"/> to the SDK and returns the
-    /// sequence number assigned to it. Callers capture the returned
-    /// sequence and later pass it to <see cref="StopIfStillLatest"/>
-    /// from a cancellation/error catch to avoid silencing a newer Send
-    /// (the CANCEL_OLDEST preemption race).
+    /// sequence number assigned to it. Re-checks <paramref name="ct"/>
+    /// under <see cref="_sdkSync"/> before issuing the Send, so a
+    /// <see cref="StopAsync"/> or <see cref="DisposeAsync"/> that
+    /// initiated cancellation while we were waiting for the lock
+    /// aborts the Send before it touches the device. Callers capture
+    /// the returned sequence and later pass it to
+    /// <see cref="StopIfStillLatest"/> from a cancellation/error catch
+    /// to avoid silencing a newer Send (the CANCEL_OLDEST preemption
+    /// race).
     /// </summary>
     /// <remarks>
     /// Send and increment happen under <see cref="_sdkSync"/> so the
     /// catch's compare-and-stop sees a coherent view: either it runs
     /// before any newer Send and observes its own sequence as latest
     /// (and stops the device), or it runs after and observes a higher
-    /// sequence (and stands down).
+    /// sequence (and stands down). The in-lock cancellation re-check
+    /// closes the race where a stop request lands between the
+    /// dispatch loop's outer <c>ThrowIfCancellationRequested</c> and
+    /// the lock acquisition here.
     /// </remarks>
-    internal long SendAndStamp(OwoSendCommand command)
+    internal long SendAndStamp(OwoSendCommand command, CancellationToken ct)
     {
         lock (_sdkSync)
         {
+            ct.ThrowIfCancellationRequested();
             _sdk.Send(command);
             var sequence = ++_lastSendSequence;
             _logger.LogDebug(
@@ -960,7 +962,25 @@ public sealed class OwoBackend : IHapticBackend
     /// after this returns, every captured sequence from before the
     /// bump is now stale and StopIfStillLatest will short-circuit.
     /// </remarks>
-    internal void StopAuthoritatively()
+    internal void StopAuthoritatively() =>
+        StopAuthoritatively(Array.Empty<ActivePlayback>());
+
+    /// <summary>
+    /// Stop+bump variant that ALSO cancels every supplied playback's
+    /// <see cref="ActivePlayback.Cts"/> under the same lock acquisition.
+    /// </summary>
+    /// <remarks>
+    /// Holding the lock across Stop, sequence bump, AND CTS cancel
+    /// closes a race where a playback's <see cref="SendAndStamp"/>
+    /// could slip in between an externally-issued Stop and the
+    /// subsequent CTS cancel — re-activating the device for a brief
+    /// window and then double-stopping when the playback's catch ran.
+    /// Because <see cref="SendAndStamp"/> re-checks its
+    /// <see cref="CancellationToken"/> under the same lock, any
+    /// playback waiting on the lock during this method observes the
+    /// post-cancel token state on entry and aborts its Send.
+    /// </remarks>
+    private void StopAuthoritatively(IReadOnlyCollection<ActivePlayback> playbacksToCancel)
     {
         lock (_sdkSync)
         {
@@ -975,8 +995,13 @@ public sealed class OwoBackend : IHapticBackend
             }
             var newSeq = ++_lastSendSequence;
             _logger.LogDebug(
-                "OWO authoritative Stop issued: backend_id={BackendId} sequence advanced to {Seq}",
-                Id, newSeq);
+                "OWO authoritative Stop issued: backend_id={BackendId} sequence advanced to {Seq} cancelling {Count} playback(s)",
+                Id, newSeq, playbacksToCancel.Count);
+
+            foreach (var playback in playbacksToCancel)
+            {
+                SafeCancel(playback.Cts);
+            }
         }
     }
 

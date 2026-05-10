@@ -402,7 +402,7 @@ public class OwoBackendTests
     {
         var backend = NewBackend(out _, out var sdk);
 
-        var seq = backend.SendAndStamp(MakeCommand("only"));
+        var seq = backend.SendAndStamp(MakeCommand("only"), CancellationToken.None);
 
         backend.StopIfStillLatest(seq).Should().BeTrue();
         sdk.Received(1).Stop();
@@ -413,11 +413,31 @@ public class OwoBackendTests
     {
         var backend = NewBackend(out _, out var sdk);
 
-        var seqA = backend.SendAndStamp(MakeCommand("A"));
-        backend.SendAndStamp(MakeCommand("B")); // bumps _lastSendSequence past A.
+        var seqA = backend.SendAndStamp(MakeCommand("A"), CancellationToken.None);
+        backend.SendAndStamp(MakeCommand("B"), CancellationToken.None); // bumps _lastSendSequence past A.
 
         backend.StopIfStillLatest(seqA).Should().BeFalse();
         sdk.DidNotReceive().Stop();
+    }
+
+    [Fact]
+    public void SendAndStamp_throws_OperationCanceledException_when_token_already_cancelled()
+    {
+        // Regression for the StopAsync/DisposeAsync race: SendAndStamp
+        // re-checks its CancellationToken under _sdkSync, so a Stop
+        // initiated while a playback is waiting on the lock aborts the
+        // Send before it touches the device. Without this in-lock
+        // check, the dispatch loop's outer ThrowIfCancellationRequested
+        // could pass and SendAndStamp could land between an external
+        // Stop and the corresponding CTS cancel.
+        var backend = NewBackend(out _, out var sdk);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => backend.SendAndStamp(MakeCommand("doomed"), cts.Token);
+
+        act.Should().Throw<OperationCanceledException>();
+        sdk.DidNotReceive().Send(Arg.Any<OwoSendCommand>());
     }
 
     [Fact]
@@ -431,7 +451,7 @@ public class OwoBackendTests
         // the helper (StopAsync's plain _sdk.Stop() didn't bump the
         // sequence, so the playback catch double-stopped the device).
         var backend = NewBackend(out _, out var sdk);
-        var seq = backend.SendAndStamp(MakeCommand("a"));
+        var seq = backend.SendAndStamp(MakeCommand("a"), CancellationToken.None);
 
         backend.StopAuthoritatively();
 
