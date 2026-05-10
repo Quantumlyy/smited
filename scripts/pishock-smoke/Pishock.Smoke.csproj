@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Smited.PishockSmoke</RootNamespace>
+    <AssemblyName>pishock-smoke</AssemblyName>
+    <!--
+      Pre-flight scratch app: deliberately not part of the daemon's
+      shipped binary, lives outside the .sln so build.sh doesn't pick
+      it up. Run with: dotnet run -p scripts/pishock-smoke (XML
+      comments forbid double-dashes so the long form is omitted here).
+    -->
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Smited.Daemon.Pishock\Smited.Daemon.Pishock.csproj" />
+  </ItemGroup>
+
+</Project>

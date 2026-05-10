@@ -23,6 +23,13 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+    <!--
+      The smoke-test scratch app under scripts/pishock-smoke uses
+      CloudPishockClient and LanPishockClient directly to fire one op
+      against a real device for credential / network verification
+      before plugging the device into the daemon.
+    -->
+    <InternalsVisibleTo Include="pishock-smoke" />
   </ItemGroup>
 
 </Project>
