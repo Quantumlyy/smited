@@ -47,6 +47,9 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
+builder.Services.AddSingleton<MockBhapticsBackend>();
+builder.Services.AddSingleton<IMockBhapticsController>(sp => sp.GetRequiredService<MockBhapticsBackend>());
+
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE
 // BackendBootstrapper publishes its initial registration events —

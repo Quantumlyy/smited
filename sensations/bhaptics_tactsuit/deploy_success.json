@@ -1,0 +1,26 @@
+{
+  "name": "deploy_success",
+  "backend_kind": "bhaptics_tactsuit",
+  "display_name": "Deploy Success",
+  "description": "Gentle two-pulse wave across the torso — production caught the new build.",
+  "tags": ["build", "deploy", "success"],
+  "default_zone_ids": ["torso"],
+  "default_intensity": 50,
+  "estimated_duration": "1.2s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 50 },
+          "duration": { "duration": "0.6s" }
+        }
+      },
+      {
+        "parameters": {
+          "intensity": { "number": 50 },
+          "duration": { "duration": "0.6s" }
+        }
+      }
+    ]
+  }
+}

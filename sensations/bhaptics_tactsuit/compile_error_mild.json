@@ -1,0 +1,20 @@
+{
+  "name": "compile_error_mild",
+  "backend_kind": "bhaptics_tactsuit",
+  "display_name": "Compile Error (Mild)",
+  "description": "Brief tap across the front chest — your last build threw a warning.",
+  "tags": ["build", "compile", "warning"],
+  "default_zone_ids": ["front_chest"],
+  "default_intensity": 60,
+  "estimated_duration": "0.4s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 60 },
+          "duration": { "duration": "0.4s" }
+        }
+      }
+    ]
+  }
+}

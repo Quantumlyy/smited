@@ -38,6 +38,27 @@ public sealed class SmitedOptions
     {
         public bool EnableMockOwo { get; set; } = true;
         public bool EnableOwo { get; set; }
+
+        /// <summary>
+        /// When <c>true</c>, registers the in-process
+        /// <c>MockBhapticsBackend</c> at startup. Provides a faithful
+        /// TactSuit X40 simulation for development and testing without
+        /// requiring bHaptics hardware or the bHaptics Player app.
+        /// Defaults to <c>false</c> so existing single-mock setups keep
+        /// their current behaviour.
+        /// </summary>
+        public bool EnableMockBhaptics { get; set; }
+
+        /// <summary>
+        /// When <c>true</c>, attempts to load the Windows-only
+        /// <c>BhapticsBackend</c> from the <c>Smited.Daemon.Bhaptics</c>
+        /// assembly at startup. No-op (with warning log) when not running
+        /// on Windows or when the assembly is missing from the build
+        /// output. Final connection to bHaptics Player happens during
+        /// <c>ConnectAsync</c>; failure is logged and the backend is
+        /// skipped without aborting daemon startup.
+        /// </summary>
+        public bool EnableBhaptics { get; set; }
     }
 
     public sealed class SensationsOptions

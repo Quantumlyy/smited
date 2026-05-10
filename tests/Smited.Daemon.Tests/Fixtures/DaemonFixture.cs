@@ -38,12 +38,15 @@ internal sealed class DaemonFixture : IDisposable
     public DaemonFixture(
         Action<string>? seed = null,
         Action<IServiceCollection>? configureServices = null,
-        string? libraryRoot = null)
+        string? libraryRoot = null,
+        bool enableMockOwo = true,
+        bool enableMockBhaptics = false)
     {
         _libraryRoot = libraryRoot ?? Path.Combine(Path.GetTempPath(), "smited-fixture-" + Guid.NewGuid().ToString("N"));
         _ownsLibraryRoot = libraryRoot is null;
         Directory.CreateDirectory(_libraryRoot);
         Directory.CreateDirectory(Path.Combine(_libraryRoot, "owo_skin"));
+        Directory.CreateDirectory(Path.Combine(_libraryRoot, "bhaptics_tactsuit"));
         seed?.Invoke(_libraryRoot);
 
         // Redirect user config away from the real ~/.config/smited so the
@@ -66,8 +69,10 @@ internal sealed class DaemonFixture : IDisposable
                         ["Smited:PanicPort"] = "0",
                         ["Smited:BindAddress"] = "127.0.0.1",
                         ["Smited:Sensations:LibraryRoot"] = _libraryRoot,
-                        ["Smited:Backends:EnableMockOwo"] = "true",
+                        ["Smited:Backends:EnableMockOwo"] = enableMockOwo ? "true" : "false",
                         ["Smited:Backends:EnableOwo"] = "false",
+                        ["Smited:Backends:EnableMockBhaptics"] = enableMockBhaptics ? "true" : "false",
+                        ["Smited:Backends:EnableBhaptics"] = "false",
                         ["Smited:History:Enabled"] = "true",
                         ["Smited:History:CustomPath"] = Path.Combine(_libraryRoot, "history.db"),
                         ["Serilog:MinimumLevel"] = "Warning",
@@ -126,6 +131,10 @@ internal sealed class DaemonFixture : IDisposable
 
     /// <summary>The mock backend's controller surface.</summary>
     public IMockOwoController MockController => _factory.Services.GetRequiredService<IMockOwoController>();
+
+    /// <summary>The mock bHaptics backend's controller surface.</summary>
+    public IMockBhapticsController MockBhapticsController =>
+        _factory.Services.GetRequiredService<IMockBhapticsController>();
 
     /// <summary>
     /// Factory for the in-process SQLite history database, so tests can

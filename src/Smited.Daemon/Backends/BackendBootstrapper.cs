@@ -59,6 +59,16 @@ internal sealed class BackendBootstrapper : IHostedService
             }
         }
 
+        if (_options.Backends.EnableMockBhaptics)
+        {
+            var mock = _services.GetRequiredService<MockBhapticsBackend>();
+            if (await RegisterAndFan(mock, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.LogInformation("Registered backend {Id} ({Kind}: {DisplayName})",
+                    mock.Id, mock.Kind, mock.DisplayName);
+            }
+        }
+
         if (_options.Backends.EnableOwo)
         {
             if (!OperatingSystem.IsWindows())

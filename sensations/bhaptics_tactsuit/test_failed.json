@@ -1,0 +1,20 @@
+{
+  "name": "test_failed",
+  "backend_kind": "bhaptics_tactsuit",
+  "display_name": "Test Failed",
+  "description": "Sharp shoulder tap — a test just went red.",
+  "tags": ["build", "test", "failure"],
+  "default_zone_ids": ["back_shoulders"],
+  "default_intensity": 75,
+  "estimated_duration": "0.35s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 75 },
+          "duration": { "duration": "0.35s" }
+        }
+      }
+    ]
+  }
+}

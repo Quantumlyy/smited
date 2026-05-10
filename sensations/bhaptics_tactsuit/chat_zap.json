@@ -1,0 +1,20 @@
+{
+  "name": "chat_zap",
+  "backend_kind": "bhaptics_tactsuit",
+  "display_name": "Chat Zap",
+  "description": "Single front-chest tap — someone @-mentioned you.",
+  "tags": ["chat", "mention"],
+  "default_zone_ids": ["vest_front_5"],
+  "default_intensity": 80,
+  "estimated_duration": "0.2s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 80 },
+          "duration": { "duration": "0.2s" }
+        }
+      }
+    ]
+  }
+}
