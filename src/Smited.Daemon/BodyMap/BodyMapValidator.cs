@@ -62,6 +62,30 @@ internal sealed class BodyMapValidator
     /// <see cref="BodyMapErrorKind.BackendDeclined"/> logs at WARN and
     /// startup continues. Warnings (overlap detection) log at WARN.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pipeline contract — every pass below the empty-zone gate reads
+    /// from the post-expansion <c>expanded</c> list, never from
+    /// <see cref="BodyMapOptions.Placements"/> directly. The
+    /// <c>expanded</c> list has already been filtered for
+    /// null/empty <c>ZoneIds</c>, mapped to known leaf zones, and
+    /// associated with a registered backend. Subsequent passes
+    /// (duplicate detection, forbidden-region checks, overlap
+    /// warnings, index construction) all operate on it.
+    /// </para>
+    /// <para>
+    /// This contract prevents null-<c>ZoneIds</c> NREs in downstream
+    /// passes. A previous round added the empty-placement gate but
+    /// left the overlap-warning pass walking <c>options.Placements</c>
+    /// directly, which crashed when <c>ZoneIds</c> was null. Anyone
+    /// adding a new pass should reach for <c>expanded</c>; if a pass
+    /// genuinely needs the original Placement (e.g. for a region-
+    /// only check that doesn't depend on zones), iterate
+    /// <c>options.Placements</c> with a defensive
+    /// <c>p.ZoneIds is not null and Count > 0</c> guard or — better —
+    /// derive the data from <c>expanded</c>.
+    /// </para>
+    /// </remarks>
     /// <param name="backends">
     /// Backends actually registered in <c>BackendRegistry</c> after
     /// every factory has run. Subset of <paramref name="allDeclaredBackendIds"/>:
@@ -355,7 +379,7 @@ internal sealed class BodyMapValidator
 
         if (options.OverlapPolicy != OverlapPolicy.Off)
         {
-            warnings.AddRange(BuildOverlapWarnings(regionsByBackend, options.Placements));
+            warnings.AddRange(BuildOverlapWarnings(regionsByBackend, expanded));
         }
 
         return new BodyMapValidationResult(
@@ -377,7 +401,7 @@ internal sealed class BodyMapValidator
 
     private static IEnumerable<BodyMapWarning> BuildOverlapWarnings(
         IReadOnlyDictionary<string, HashSet<BodyRegion>> regionsByBackend,
-        IReadOnlyList<Placement> placements)
+        IReadOnlyList<ExpandedPlacement> expanded)
     {
         // Pairwise scan over distinct (backend, region) declarations.
         // Two placements warn if their regions overlap anatomically —
@@ -385,11 +409,28 @@ internal sealed class BodyMapValidator
         // overlapping region pair, deduped so ChestFront ↔
         // ChestOverHeart yields a single entry rather than one per
         // direction.
+        //
+        // Per the validator's pipeline contract, this method reads
+        // zone-id data from `expanded`, not from options.Placements.
+        // The zonesByKey lookup below is the post-expansion-leaf
+        // equivalent of the previous ZoneIdsFor() helper, with two
+        // upsides: (1) no null-ZoneIds NRE risk because expanded
+        // already filtered them out at validation step 1, and (2)
+        // group ids in placements show up here as their member leaf
+        // zones, which is what the warning consumer actually wants.
+        var zonesByKey = expanded
+            .GroupBy(x => (x.BackendId, x.Region))
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g
+                    .Select(x => x.ZoneId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
+
         var declarations = regionsByBackend
             .SelectMany(kv => kv.Value.Select(r => (BackendId: kv.Key, Region: r)))
             .ToList();
 
-        var seen = new HashSet<(BodyRegion A, BodyRegion B, string IdA, string IdB)>();
         var seenPairKeys = new HashSet<string>();
 
         for (var i = 0; i < declarations.Count; i++)
@@ -419,8 +460,12 @@ internal sealed class BodyMapValidator
                     continue;
                 }
 
-                var zonesA = ZoneIdsFor(placements, idA, regA);
-                var zonesB = ZoneIdsFor(placements, idB, regB);
+                var zonesA = zonesByKey.TryGetValue((idA, regA), out var listA)
+                    ? listA
+                    : Array.Empty<string>();
+                var zonesB = zonesByKey.TryGetValue((idB, regB), out var listB)
+                    ? listB
+                    : Array.Empty<string>();
 
                 yield return new BodyMapWarning(
                     regA,
@@ -432,18 +477,6 @@ internal sealed class BodyMapValidator
             }
         }
     }
-
-    private static IReadOnlyList<string> ZoneIdsFor(
-        IReadOnlyList<Placement> placements,
-        string backendId,
-        BodyRegion region) =>
-        placements
-            .Where(p =>
-                string.Equals(p.BackendId, backendId, StringComparison.OrdinalIgnoreCase)
-                && p.Region == region)
-            .SelectMany(p => p.ZoneIds)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
 
     /// <summary>
     /// One backend / leaf-zone / region tuple after the per-placement

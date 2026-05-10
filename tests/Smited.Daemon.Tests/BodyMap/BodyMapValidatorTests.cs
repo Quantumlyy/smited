@@ -616,6 +616,80 @@ public class BodyMapValidatorTests
     }
 
     [Fact]
+    public void Null_ZoneIds_placement_does_not_crash_overlap_detection()
+    {
+        // The previous round added the empty-zones gate at the top of
+        // validation, but the overlap-warning pass kept walking
+        // options.Placements directly and called SelectMany on
+        // p.ZoneIds — null crashed the whole validation, masking the
+        // structured EmptyPlacement error the user should have seen.
+        // Both errors must surface together; the validator's job is
+        // to accumulate.
+        var a = MakeFake("backend-a", zones: ["pectoral_l"]);
+        var b = MakeFake("backend-b", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            AllowOverrideRegions = { BodyRegion.ChestOverHeart },
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "backend-a",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+                new Placement
+                {
+                    BackendId = "backend-b",
+                    ZoneIds = null!,
+                    Region = BodyRegion.ChestFront,
+                },
+            },
+        };
+
+        // Pre-fix: throws NullReferenceException inside
+        // BuildOverlapWarnings → ZoneIdsFor → SelectMany(p.ZoneIds).
+        // Post-fix: returns errors cleanly.
+        var result = new BodyMapValidator().Validate(new[] { a, b }, options);
+
+        result.Errors.Should().Contain(e => e.Kind == BodyMapErrorKind.EmptyPlacement);
+    }
+
+    [Fact]
+    public void Empty_ZoneIds_placement_with_overlap_does_not_crash()
+    {
+        // Same shape with empty list instead of null, since the
+        // user-visible failure mode is identical.
+        var a = MakeFake("backend-a", zones: ["pectoral_l"]);
+        var b = MakeFake("backend-b", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            AllowOverrideRegions = { BodyRegion.ChestOverHeart },
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "backend-a",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+                new Placement
+                {
+                    BackendId = "backend-b",
+                    ZoneIds = new List<string>(),
+                    Region = BodyRegion.ChestFront,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { a, b }, options);
+
+        result.Errors.Should().Contain(e => e.Kind == BodyMapErrorKind.EmptyPlacement);
+    }
+
+    [Fact]
     public void Same_zone_with_different_casing_is_DuplicateZonePlacement()
     {
         // GroupBy on the (BackendId, ZoneId) tuple defaulted to
