@@ -142,6 +142,31 @@ public class PishockBackendFactoryTests
     }
 
     [Fact]
+    public void TryCreate_uses_descriptor_top_level_DisplayName_when_set()
+    {
+        // Real-factory counterpart of the mock-factory test. The
+        // descriptor's top-level DisplayName is the documented override
+        // surface and must reach the backend regardless of transport.
+        var (factory, section, services, logger) = NewFactory(new Dictionary<string, string?>
+        {
+            ["Mode"] = "Cloud",
+            ["Username"] = "alice",
+            ["ApiKey"] = "k1",
+            ["ShareCode"] = "ABCD1234",
+        });
+        var descriptor = new BackendDescriptor
+        {
+            Kind = "pishock",
+            Id = "left-thigh",
+            DisplayName = "Left thigh",
+        };
+
+        var backend = factory.TryCreate(descriptor, section, services, logger);
+
+        backend!.DisplayName.Should().Be("Left thigh");
+    }
+
+    [Fact]
     public void TryCreate_returns_distinct_instances_for_distinct_descriptors()
     {
         var (factory, section, services, logger) = NewFactory(new Dictionary<string, string?>

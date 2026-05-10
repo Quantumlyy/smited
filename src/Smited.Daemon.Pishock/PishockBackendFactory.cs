@@ -42,6 +42,14 @@ public sealed class PishockBackendFactory : IBackendFactory
 
         var options = optionsSection.Get<PishockBackendOptions>() ?? new PishockBackendOptions();
 
+        // Same precedence as MockPishockBackendFactory: descriptor.DisplayName
+        // is the documented override surface, takes precedence over
+        // Options.DisplayName.
+        if (!string.IsNullOrEmpty(descriptor.DisplayName))
+        {
+            options.DisplayName = descriptor.DisplayName;
+        }
+
         // Re-use the mock factory's shared validation rules (AllowedOps,
         // intensity caps, durations, rate limits) so the real and mock
         // surfaces enforce the same constraints with a single source of

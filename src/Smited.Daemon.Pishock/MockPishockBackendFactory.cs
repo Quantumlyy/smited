@@ -37,6 +37,16 @@ public sealed class MockPishockBackendFactory : IBackendFactory
         ArgumentNullException.ThrowIfNull(services);
 
         var options = optionsSection.Get<PishockBackendOptions>() ?? new PishockBackendOptions();
+
+        // The descriptor's top-level DisplayName is the documented
+        // override surface; honor it over Options.DisplayName so the
+        // sample config in docs/pishock-config-example.json works as
+        // shown.
+        if (!string.IsNullOrEmpty(descriptor.DisplayName))
+        {
+            options.DisplayName = descriptor.DisplayName;
+        }
+
         ValidateOptions(descriptor, options);
 
         return ActivatorUtilities.CreateInstance<MockPishockBackend>(services, descriptor.Id, options);

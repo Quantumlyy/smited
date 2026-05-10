@@ -159,7 +159,7 @@ public class MockPishockBackendFactoryTests
     }
 
     [Fact]
-    public void TryCreate_uses_DescriptorId_when_options_DisplayName_is_unset()
+    public void TryCreate_uses_DescriptorId_when_no_DisplayName_set()
     {
         var (factory, section, services, logger) = NewFactory();
         var descriptor = new BackendDescriptor
@@ -172,6 +172,58 @@ public class MockPishockBackendFactoryTests
         var backend = factory.TryCreate(descriptor, section, services, logger);
 
         backend!.DisplayName.Should().Be("right-calf");
+    }
+
+    [Fact]
+    public void TryCreate_uses_descriptor_top_level_DisplayName_when_set()
+    {
+        // The descriptor's top-level DisplayName is the documented
+        // override surface (see BackendDescriptor.DisplayName XML doc
+        // and the sample config in docs/pishock-config-example.json).
+        // Ignoring it would mean the documented field is inert and
+        // users would have to discover the Options.DisplayName fallback
+        // by reading source.
+        var (factory, section, services, logger) = NewFactory();
+        var descriptor = new BackendDescriptor
+        {
+            Kind = "mock_pishock",
+            Id = "right-calf",
+            Enabled = true,
+            DisplayName = "Right calf",
+        };
+
+        var backend = factory.TryCreate(descriptor, section, services, logger);
+
+        backend!.DisplayName.Should().Be("Right calf");
+    }
+
+    [Fact]
+    public void TryCreate_descriptor_DisplayName_takes_precedence_over_options_DisplayName()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Options:DisplayName"] = "from-options",
+            })
+            .Build();
+        var section = config.GetSection("Options");
+        var services = new ServiceCollection()
+            .AddSingleton<TimeProvider>(new FakeTimeProvider(
+                new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero)))
+            .AddLogging()
+            .BuildServiceProvider();
+        var factory = new MockPishockBackendFactory();
+        var descriptor = new BackendDescriptor
+        {
+            Kind = "mock_pishock",
+            Id = "right-calf",
+            DisplayName = "from-descriptor",
+        };
+
+        var backend = factory.TryCreate(descriptor, section, services, NullLogger.Instance);
+
+        backend!.DisplayName.Should().Be("from-descriptor",
+            "the descriptor's top-level DisplayName is the documented override surface");
     }
 
     [Fact]
