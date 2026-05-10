@@ -1,4 +1,6 @@
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Smited.Daemon.Backends;
 using Smited.Daemon.Tests.Fixtures;
 using Smited.V1;
 using Xunit;
@@ -23,6 +25,22 @@ public class CapabilityDiscoveryTests : IDisposable
         summary.Status.Should().Be(BackendStatus.Ready);
         summary.Capabilities.Should().BeEquivalentTo(
             "ems", "zoned", "calibrated", "sensation_registry_mutable");
+    }
+
+    [Fact]
+    public async Task ListBackends_skips_backends_that_fail_to_connect()
+    {
+        var broken = new FakeBackend("broken", kind: "broken_kind", displayName: "Broken Backend")
+        {
+            OnConnect = _ => Task.FromException(new InvalidOperationException("connect failed")),
+        };
+        using var fixture = new DaemonFixture(configureServices: services =>
+            services.AddSingleton<IHapticBackend>(broken));
+
+        var response = await fixture.Client.ListBackendsAsync(new ListBackendsRequest());
+
+        response.Backends.Select(b => b.Id).Should().Contain("mock-owo");
+        response.Backends.Select(b => b.Id).Should().NotContain("broken");
     }
 
     [Fact]

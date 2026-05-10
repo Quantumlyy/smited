@@ -25,6 +25,7 @@ internal sealed class BackendBootstrapper : IHostedService
     private readonly EventBus _bus;
     private readonly SmitedOptions _options;
     private readonly IServiceProvider _services;
+    private readonly IEnumerable<IHapticBackend> _additionalBackends;
     private readonly ILogger<BackendBootstrapper> _logger;
     private readonly List<Task> _fanTasks = new();
     private readonly List<IHapticBackend> _registered = new();
@@ -35,23 +36,27 @@ internal sealed class BackendBootstrapper : IHostedService
         EventBus bus,
         IOptions<SmitedOptions> options,
         IServiceProvider services,
+        IEnumerable<IHapticBackend> additionalBackends,
         ILogger<BackendBootstrapper> logger)
     {
         _registry = registry;
         _bus = bus;
         _options = options.Value;
         _services = services;
+        _additionalBackends = additionalBackends;
         _logger = logger;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         if (_options.Backends.EnableMockOwo)
         {
             var mock = _services.GetRequiredService<MockOwoBackend>();
-            RegisterAndFan(mock);
-            _logger.LogInformation("Registered backend {Id} ({Kind}: {DisplayName})",
-                mock.Id, mock.Kind, mock.DisplayName);
+            if (await RegisterAndFan(mock, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.LogInformation("Registered backend {Id} ({Kind}: {DisplayName})",
+                    mock.Id, mock.Kind, mock.DisplayName);
+            }
         }
 
         if (_options.Backends.EnableOwo)
@@ -71,13 +76,22 @@ internal sealed class BackendBootstrapper : IHostedService
                 else
                 {
                     var owo = (IHapticBackend)ActivatorUtilities.CreateInstance(_services, owoType);
-                    RegisterAndFan(owo);
-                    _logger.LogInformation("Registered Windows OWO backend {Id}", owo.Id);
+                    if (await RegisterAndFan(owo, cancellationToken).ConfigureAwait(false))
+                    {
+                        _logger.LogInformation("Registered Windows OWO backend {Id}", owo.Id);
+                    }
                 }
             }
         }
 
-        return Task.CompletedTask;
+        foreach (var backend in _additionalBackends)
+        {
+            if (await RegisterAndFan(backend, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.LogInformation("Registered backend {Id} ({Kind}: {DisplayName})",
+                    backend.Id, backend.Kind, backend.DisplayName);
+            }
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -114,11 +128,47 @@ internal sealed class BackendBootstrapper : IHostedService
         }
     }
 
-    private void RegisterAndFan(IHapticBackend backend)
+    private async Task<bool> RegisterAndFan(IHapticBackend backend, CancellationToken cancellationToken)
     {
-        _registry.Register(backend);
+        try
+        {
+            await backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Skipping backend {BackendId}: ConnectAsync failed",
+                BackendIdForLog(backend));
+            return false;
+        }
+
+        try
+        {
+            _registry.Register(backend);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Skipping backend {BackendId}: registration failed",
+                BackendIdForLog(backend));
+            return false;
+        }
+
         _registered.Add(backend);
         _fanTasks.Add(Task.Run(() => FanEventsAsync(backend, _stopping.Token)));
+        return true;
+    }
+
+    private static string BackendIdForLog(IHapticBackend backend)
+    {
+        try
+        {
+            return backend.Id;
+        }
+        catch
+        {
+            return backend.GetType().FullName ?? backend.GetType().Name;
+        }
     }
 
     private async Task FanEventsAsync(IHapticBackend backend, CancellationToken ct)

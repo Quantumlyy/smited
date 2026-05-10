@@ -57,7 +57,10 @@ internal sealed class FakeBackend : IHapticBackend
 
     public Func<BackendStopRequest, CancellationToken, Task<int>>? OnStop { get; set; }
 
-    public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
+    public Func<CancellationToken, Task>? OnConnect { get; set; }
+
+    public Task ConnectAsync(CancellationToken ct) =>
+        OnConnect?.Invoke(ct) ?? Task.CompletedTask;
 
     public Task<BackendTriggerResult> TriggerAsync(BackendTriggerRequest request, CancellationToken ct) =>
         OnTrigger?.Invoke(request, ct) ?? Task.FromResult(new BackendTriggerResult(request.SensationId, TimeSpan.Zero));
