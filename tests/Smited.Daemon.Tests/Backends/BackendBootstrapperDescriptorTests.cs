@@ -17,11 +17,36 @@ namespace Smited.Daemon.Tests.Backends;
 public class BackendBootstrapperDescriptorTests
 {
     [Fact]
-    public async Task Empty_items_registers_no_backends()
+    public async Task Empty_items_synthesizes_default_mock_owo_descriptor()
     {
+        // The bootstrapper's empty-Items fallback ships a default
+        // mock-owo descriptor at startup so "just run the daemon"
+        // works with no configuration. Tests that want to assert
+        // "no backends registered" use a Disabled descriptor instead
+        // (see Disabled_descriptor_is_skipped).
         await using var sys = await Build(items: Array.Empty<BackendDescriptor>());
 
-        sys.Registry.Count.Should().Be(0);
+        sys.Registry.Count.Should().Be(1);
+        sys.Registry.TryGet("mock-owo").Should().NotBeNull();
+        sys.Registry.TryGet("mock-owo")!.Kind.Should().Be("owo_skin");
+    }
+
+    [Fact]
+    public async Task Non_empty_items_suppresses_the_default_mock_owo_synthesis()
+    {
+        // A user descriptor with a non-default id; the synthesized
+        // default mock-owo must NOT also register (otherwise we'd
+        // have two mock_owo singletons in flight).
+        var items = new[]
+        {
+            new BackendDescriptor { Kind = "mock_owo", Id = "custom-mock", Enabled = true },
+        };
+
+        await using var sys = await Build(items);
+
+        sys.Registry.Count.Should().Be(1);
+        sys.Registry.TryGet("custom-mock").Should().NotBeNull();
+        sys.Registry.TryGet("mock-owo").Should().BeNull();
     }
 
     [Fact]

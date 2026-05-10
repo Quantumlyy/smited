@@ -74,8 +74,12 @@ internal sealed class BackendBootstrapper : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var descriptors = _options.Backends.Items;
+        IReadOnlyList<BackendDescriptor> descriptors = _options.Backends.Items;
 
+        // Validate user-supplied descriptors first so configuration
+        // mistakes surface even when the fallback kicks in for an
+        // accidentally-empty list. The synthesized default below is
+        // well-formed by construction and doesn't need re-validation.
         var validationErrors = BackendDescriptorValidator.Validate(descriptors);
         if (validationErrors.Count > 0)
         {
@@ -87,6 +91,22 @@ internal sealed class BackendBootstrapper : IHostedService
                 {
                     "Backend descriptor configuration is invalid:" + Environment.NewLine + combined,
                 });
+        }
+
+        if (descriptors.Count == 0)
+        {
+            _logger.LogInformation(
+                "No backend descriptors configured; registering default mock-owo. "
+                + "Configure Smited:Backends:Items with a non-empty array to opt out.");
+            descriptors = new[]
+            {
+                new BackendDescriptor
+                {
+                    Kind = "mock_owo",
+                    Id = "mock-owo",
+                    Enabled = true,
+                },
+            };
         }
 
         for (var i = 0; i < descriptors.Count; i++)

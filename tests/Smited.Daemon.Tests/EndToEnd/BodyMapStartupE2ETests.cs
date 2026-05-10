@@ -21,10 +21,14 @@ public class BodyMapStartupE2ETests
     [Fact]
     public void Duplicate_ids_abort_startup_with_a_clear_error()
     {
-        // Default fixture seeds Items[0] = mock-owo. Adding Items[1]
-        // with the same Id (different Kind) trips the validator.
+        // Two explicit descriptors that share an Id. The bootstrapper's
+        // empty-Items fallback only fires when the user supplies zero
+        // descriptors, so the test populates both Items entries.
         var act = () => new DaemonFixture(additionalConfig: new Dictionary<string, string?>
         {
+            ["Smited:Backends:Items:0:Kind"] = "mock_owo",
+            ["Smited:Backends:Items:0:Id"] = "mock-owo",
+            ["Smited:Backends:Items:0:Enabled"] = "true",
             ["Smited:Backends:Items:1:Kind"] = "owo_skin",
             ["Smited:Backends:Items:1:Id"] = "mock-owo",
             ["Smited:Backends:Items:1:Enabled"] = "true",
@@ -39,6 +43,9 @@ public class BodyMapStartupE2ETests
     {
         var act = () => new DaemonFixture(additionalConfig: new Dictionary<string, string?>
         {
+            ["Smited:Backends:Items:0:Kind"] = "mock_owo",
+            ["Smited:Backends:Items:0:Id"] = "mock-owo",
+            ["Smited:Backends:Items:0:Enabled"] = "true",
             ["Smited:Backends:Items:1:Kind"] = "mock_owo",
             ["Smited:Backends:Items:1:Id"] = "mock-secondary",
             ["Smited:Backends:Items:1:Enabled"] = "true",
@@ -55,9 +62,9 @@ public class BodyMapStartupE2ETests
         // string.IsNullOrWhiteSpace check in the validator.
         var act = () => new DaemonFixture(additionalConfig: new Dictionary<string, string?>
         {
-            ["Smited:Backends:Items:1:Kind"] = "",
-            ["Smited:Backends:Items:1:Id"] = "ghost",
-            ["Smited:Backends:Items:1:Enabled"] = "true",
+            ["Smited:Backends:Items:0:Kind"] = "",
+            ["Smited:Backends:Items:0:Id"] = "ghost",
+            ["Smited:Backends:Items:0:Enabled"] = "true",
         });
 
         act.Should().Throw<OptionsValidationException>()
@@ -122,6 +129,37 @@ public class BodyMapStartupE2ETests
 
         fixture.Registry.Count.Should().Be(0);
         fixture.BodyMapState.RefusedBackendCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void Empty_Items_synthesizes_default_mock_owo()
+    {
+        // No descriptors supplied at all → bootstrapper synthesizes
+        // a default mock-owo. This is the "just run the daemon"
+        // shape that ships in appsettings.json (which has
+        // "Items": []).
+        using var fixture = new DaemonFixture();
+
+        fixture.Registry.Count.Should().Be(1);
+        fixture.Registry.TryGet("mock-owo").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Non_empty_Items_replaces_the_default()
+    {
+        // A user-supplied descriptor list — even a single entry —
+        // suppresses the synthesized default. Only the user's
+        // descriptors register.
+        using var fixture = new DaemonFixture(additionalConfig: new Dictionary<string, string?>
+        {
+            ["Smited:Backends:Items:0:Kind"] = "mock_owo",
+            ["Smited:Backends:Items:0:Id"] = "custom-mock",
+            ["Smited:Backends:Items:0:Enabled"] = "true",
+        });
+
+        fixture.Registry.Count.Should().Be(1);
+        fixture.Registry.TryGet("custom-mock").Should().NotBeNull();
+        fixture.Registry.TryGet("mock-owo").Should().BeNull();
     }
 
     [Fact]

@@ -158,6 +158,47 @@ Both side-by-side:
 
 `Enabled: false` keeps a descriptor in the file but skips registration — useful when you want to hold onto the configuration for hardware you've temporarily disconnected.
 
+### Disabling the default mock backend
+
+`appsettings.json` ships with `Smited:Backends:Items` set to an empty array. When the configured `Items` is empty (or missing entirely), the daemon synthesizes a default `mock_owo` descriptor with id `mock-owo` and logs the synthesis at startup. This keeps "just run the daemon" frictionless while letting any non-empty `Items` array opt out cleanly.
+
+To run with only the real OWO backend (no mock), provide an explicit non-empty `Items` array containing only the OWO descriptor:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        {
+          "Kind": "owo_skin",
+          "Id": "owo-primary",
+          "Enabled": true,
+          "Options": {
+            "GameDisplayName": "smited haptic daemon"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+To run with no backends at all (uncommon — the daemon's gRPC surface will report no registered backends), pin the array to a disabled placeholder so it stays non-empty without registering anything:
+
+```json
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        { "Kind": "no_op", "Id": "placeholder", "Enabled": false }
+      ]
+    }
+  }
+}
+```
+
+The `Enabled: false` keeps the descriptor from tripping the "no factory registered for kind" warning at registration time; the validator itself only requires `Kind` and `Id` to be present.
+
 ### Migrating from the old boolean shape
 
 If you have an existing user-config file from before the descriptor refactor, replace each boolean with the equivalent descriptor entry:

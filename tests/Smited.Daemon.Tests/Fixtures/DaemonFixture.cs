@@ -62,15 +62,21 @@ internal sealed class DaemonFixture : IDisposable
                 builder.UseEnvironment("Testing");
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
+                    // The fixture intentionally does NOT pre-populate
+                    // Smited:Backends:Items here. The bootstrapper's
+                    // empty-Items fallback synthesizes a default mock-owo
+                    // descriptor at startup, which gives every E2E test
+                    // mock-owo for free without the fixture leaking a
+                    // shape that the production daemon doesn't ship in
+                    // appsettings.json. Tests that need additional or
+                    // alternative descriptors layer them on via
+                    // `additionalConfig`.
                     var baseConfig = new Dictionary<string, string?>
                     {
                         ["Smited:GrpcPort"] = "0",
                         ["Smited:PanicPort"] = "0",
                         ["Smited:BindAddress"] = "127.0.0.1",
                         ["Smited:Sensations:LibraryRoot"] = _libraryRoot,
-                        ["Smited:Backends:Items:0:Kind"] = "mock_owo",
-                        ["Smited:Backends:Items:0:Id"] = "mock-owo",
-                        ["Smited:Backends:Items:0:Enabled"] = "true",
                         ["Smited:History:Enabled"] = "true",
                         ["Smited:History:CustomPath"] = Path.Combine(_libraryRoot, "history.db"),
                         ["Serilog:MinimumLevel"] = "Warning",
