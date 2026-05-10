@@ -13,6 +13,33 @@ namespace Smited.Daemon.BodyMap;
 internal sealed class BodyMapValidator
 {
     /// <summary>
+    /// Equality on the <c>(BackendId, ZoneId)</c> tuple under
+    /// <see cref="StringComparer.OrdinalIgnoreCase"/> on both members.
+    /// Used by duplicate-zone detection so <c>pectoral_l</c> and
+    /// <c>PECTORAL_L</c> resolve to the same key — without this the
+    /// default tuple comparer would let a case-mismatched duplicate
+    /// slip past <c>GroupBy</c> and then silently collide in the
+    /// case-insensitive ZoneRegions index downstream.
+    /// </summary>
+    private static readonly IEqualityComparer<(string BackendId, string ZoneId)>
+        BackendZoneKeyComparer = new BackendZoneKeyEqualityComparer();
+
+    private sealed class BackendZoneKeyEqualityComparer
+        : IEqualityComparer<(string BackendId, string ZoneId)>
+    {
+        public bool Equals(
+            (string BackendId, string ZoneId) x,
+            (string BackendId, string ZoneId) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.BackendId, y.BackendId)
+            && StringComparer.OrdinalIgnoreCase.Equals(x.ZoneId, y.ZoneId);
+
+        public int GetHashCode((string BackendId, string ZoneId) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.BackendId),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ZoneId));
+    }
+
+    /// <summary>
     /// Convenience overload that treats every registered backend as
     /// also-declared. Useful for unit tests that don't exercise the
     /// declined-vs-typo distinction; production code uses the three-arg
@@ -175,7 +202,7 @@ internal sealed class BodyMapValidator
         // previous accumulator-based first-write-wins approach hid this
         // intent in control flow and silently dropped the second region.
         var duplicateGroups = expanded
-            .GroupBy(x => (x.BackendId, x.ZoneId))
+            .GroupBy(x => (x.BackendId, x.ZoneId), BackendZoneKeyComparer)
             .Where(g => g.Count() > 1)
             .ToArray();
 
@@ -197,7 +224,7 @@ internal sealed class BodyMapValidator
 
         var duplicateKeys = duplicateGroups
             .Select(g => g.Key)
-            .ToHashSet();
+            .ToHashSet(BackendZoneKeyComparer);
 
         // Pass 3: for non-duplicate entries, run forbidden-region checks
         // and build the regionsByBackend / zoneRegions indices. Walk
@@ -205,7 +232,8 @@ internal sealed class BodyMapValidator
         // region overlaps each — RegionHierarchy.Overlaps is symmetric
         // so a placement on a parent (ChestFront) trips a forbidden
         // child (ChestOverHeart) and vice-versa.
-        foreach (var entry in expanded.Where(x => !duplicateKeys.Contains((x.BackendId, x.ZoneId))))
+        foreach (var entry in expanded.Where(
+            x => !duplicateKeys.Contains((x.BackendId, x.ZoneId))))
         {
             var backend = backendById[entry.BackendId];
 

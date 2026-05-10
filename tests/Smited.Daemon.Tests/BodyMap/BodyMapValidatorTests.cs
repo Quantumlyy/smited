@@ -559,6 +559,82 @@ public class BodyMapValidatorTests
     }
 
     [Fact]
+    public void Same_zone_with_different_casing_is_DuplicateZonePlacement()
+    {
+        // GroupBy on the (BackendId, ZoneId) tuple defaulted to
+        // case-sensitive equality, so PECTORAL_L vs pectoral_l slipped
+        // past the duplicate check while the case-insensitive
+        // ZoneRegions index downstream silently overwrote one entry
+        // with the other. The custom BackendZoneKeyComparer enforces
+        // OrdinalIgnoreCase on both members so detection and storage
+        // agree.
+        var backend = MakeFake("vest", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            // AllowOverrideRegions keeps the smited-default cardiac
+            // error from drowning out the duplicate assertion.
+            AllowOverrideRegions = { BodyRegion.ChestOverHeart },
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+                new Placement
+                {
+                    BackendId = "vest",
+                    ZoneIds = { "PECTORAL_L" },
+                    Region = BodyRegion.LeftThigh,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().Contain(
+            e => e.Kind == BodyMapErrorKind.DuplicateZonePlacement);
+    }
+
+    [Fact]
+    public void Same_backend_id_with_different_casing_is_DuplicateZonePlacement()
+    {
+        // Paranoid but cheap: backend ids should also collapse
+        // case-insensitively at the duplicate-detection key. The
+        // gRPC IDENT regex doesn't permit uppercase so this is
+        // unreachable from real clients, but the validator operates
+        // on user config which is free-form.
+        var backend = MakeFake("owo-primary", zones: ["pectoral_l"]);
+
+        var options = new BodyMapOptions
+        {
+            AllowOverrideRegions = { BodyRegion.ChestOverHeart },
+            Placements =
+            {
+                new Placement
+                {
+                    BackendId = "owo-primary",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.ChestFront,
+                },
+                new Placement
+                {
+                    BackendId = "OWO-PRIMARY",
+                    ZoneIds = { "pectoral_l" },
+                    Region = BodyRegion.LeftThigh,
+                },
+            },
+        };
+
+        var result = new BodyMapValidator().Validate(new[] { backend }, options);
+
+        result.Errors.Should().Contain(
+            e => e.Kind == BodyMapErrorKind.DuplicateZonePlacement);
+    }
+
+    [Fact]
     public void Same_zone_same_region_declared_twice_is_still_DuplicateZonePlacement()
     {
         // Redundant placement: two entries covering the same (backend,
