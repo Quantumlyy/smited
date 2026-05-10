@@ -89,8 +89,17 @@ public class SmitedActionServiceTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// Round-N+3 fix #1 regression test. <c>StopBackendAsync</c>
+    /// produces a StopRecord with <c>All=false</c> and <c>BackendId</c>
+    /// populated — the historical gRPC <c>Stop{backend_id}</c> shape.
+    /// Pre-fix the facade copy-pasted <c>All=true</c> from the panic
+    /// path, collapsing backend-scoped stops into daemon-wide ones in
+    /// the database; postmortems against <c>WHERE All=false</c> would
+    /// have missed every admin-triggered backend stop.
+    /// </summary>
     [Fact]
-    public async Task StopBackendAsync_records_StopRecord_with_BackendId_and_admin_source()
+    public async Task StopBackendAsync_records_All_false_with_BackendId_set()
     {
         await Actions.StopBackendAsync("mock-owo", TriggerSource.Admin, default);
 
@@ -102,7 +111,35 @@ public class SmitedActionServiceTests : IDisposable
                 .OrderByDescending(s => s.Id)
                 .FirstOrDefaultAsync();
             row.Should().NotBeNull();
-            row!.All.Should().BeTrue();
+            row!.All.Should().BeFalse(
+                "backend-scoped stop is not daemon-wide; the All flag is reserved for that case");
+            row.BackendId.Should().Be("mock-owo");
+            row.SensationId.Should().BeNull();
+        });
+    }
+
+    /// <summary>
+    /// Locks in the panic-vs-backend-stop distinction in the recording
+    /// layer alongside the fix above. A future refactor that
+    /// re-collapses the two would have to flip this expectation,
+    /// which forces a deliberate choice rather than a copy-paste
+    /// regression.
+    /// </summary>
+    [Fact]
+    public async Task PanicAsync_records_All_true_with_no_BackendId()
+    {
+        await Actions.PanicAsync(TriggerSource.Admin, peer: null, userAgent: null, default);
+
+        await EventuallyAsync(async () =>
+        {
+            await using var db = await _fixture.HistoryFactory.CreateDbContextAsync();
+            var row = await db.Stops
+                .Where(s => s.Source == "admin" && s.All)
+                .OrderByDescending(s => s.Id)
+                .FirstOrDefaultAsync();
+            row.Should().NotBeNull();
+            row!.All.Should().BeTrue("panic stops are daemon-wide");
+            row.BackendId.Should().BeNull("panic isn't scoped to a single backend");
         });
     }
 

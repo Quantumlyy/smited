@@ -79,7 +79,11 @@ internal sealed class SmitedActionService
         {
             Timestamp = _time.GetUtcNow(),
             Source = SourceToString(source),
-            All = true,
+            // Backend-scoped stop: All=false, BackendId set. Matches
+            // the historical gRPC Stop{backend_id} shape so postmortem
+            // queries can distinguish backend-scoped stops from
+            // daemon-wide panics (which record All=true).
+            All = false,
             BackendId = backendId,
             StoppedCount = stopped,
         });
