@@ -78,27 +78,91 @@
   </ItemGroup>
 
   <!--
-    Copy the OWO backend's full bin folder next to the daemon binary so
-    the reflective Type.GetType("Smited.Daemon.Owo.OwoBackend, ...")
-    finds the assembly AND its OWO SDK runtime dependency
-    (OWO.dll). The OWO project sets CopyLocalLockFileAssemblies so its
-    own bin folder is the source of truth. Files that already exist in
-    the daemon's output (Smited.Daemon.Abstractions.dll, Google.Protobuf,
-    etc.) are skipped so we don't risk version drift between two
-    compilation contexts of the same dependency.
+    Lay out the OWO backend's runtime files next to the daemon binary
+    so the reflective Type.GetType("Smited.Daemon.Owo.OwoBackend, ...")
+    finds the assembly AND its OWO SDK runtime dependency (OWO.dll).
+
+    Registered as Content items via BeforeTargets="AssignTargetPaths"
+    rather than a standalone Copy target so the files thread through
+    both `dotnet build` (CopyToOutputDirectory) and `dotnet publish`
+    (CopyToPublishDirectory) — a plain Copy target only ran AfterTargets
+    Build and didn't propagate into the publish dir, leaving published
+    Windows daemons with EnableOwo=true unable to load the backend.
+
+    PreserveNewest semantics handle incremental rebuilds: when the OWO
+    project recompiles, its newer DLL replaces the stale copy in the
+    daemon output. The whitelist is intentional — we only carry the OWO-
+    specific files (the project DLL/PDB + the OWO NuGet runtime
+    assembly). Shared transitives like Smited.Daemon.Abstractions.dll
+    and Google.Protobuf.dll already arrive via the daemon's own
+    dependency graph.
   -->
-  <Target Name="CopyOwoBackendRuntime"
-          AfterTargets="Build"
-          Condition="'$(OS)' == 'Windows_NT'">
+  <Target Name="ResolveOwoBackendRuntime"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(OS)' == 'Windows_NT' and '$(_OwoBackendRuntimeResolved)' != 'true'">
+    <!--
+      Build the OWO project first and then ask it for its TargetPath.
+
+      Two subtleties to keep in mind:
+
+      * ReferenceOutputAssembly=false on the ProjectReference triggers
+        a Build during a normal `dotnet build`, but the publish chain
+        reaches AssignTargetPaths before that build runs in some
+        configurations (Release + -r win-x64). An explicit <MSBuild>
+        invocation here makes the dependency unambiguous.
+
+      * RuntimeIdentifier= (empty) is passed deliberately so the OWO
+        project's bin folder doesn't fork into a RID-specific
+        subdirectory when the daemon is published self-contained. The
+        OWO assembly is fully managed; it doesn't need a RID-specific
+        layout, and a uniform path makes the Content metadata below
+        portable across `dotnet build` and every flavour of
+        `dotnet publish`.
+
+      GetTargetPath returns the project's primary output assembly, so
+      its directory IS the bin folder we want — no string interpolation
+      against MSBuild conventions that may shift across SDK versions.
+    -->
+    <MSBuild Projects="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier="
+             Targets="Build" />
+    <MSBuild Projects="..\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier="
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_OwoTargetPathItem" />
+    </MSBuild>
+    <PropertyGroup>
+      <_OwoBinDir>%(_OwoTargetPathItem.RootDir)%(_OwoTargetPathItem.Directory)</_OwoBinDir>
+    </PropertyGroup>
     <ItemGroup>
-      <_OwoSourceFiles Include="..\Smited.Daemon.Owo\bin\$(Configuration)\net9.0-windows\*.dll" />
-      <_OwoSourceFiles Include="..\Smited.Daemon.Owo\bin\$(Configuration)\net9.0-windows\*.pdb" />
-      <_OwoNewFiles Include="@(_OwoSourceFiles)"
-                    Condition="!Exists('$(OutDir)%(Filename)%(Extension)')" />
+      <!--
+        Each file declared as a separate Content item with an explicit
+        Link metadata. A semicolon-batched Include inherits the Link
+        from the surrounding Content collection — including the
+        sensation library's <Link>sensations\…</Link> — and metadata
+        batching expands the placeholder against the wrong item, which
+        in practice rewrites OWO.dll to one of the sensation file names.
+        Three explicit entries dodge that batching entirely.
+      -->
+      <Content Include="$(_OwoBinDir)Smited.Daemon.Owo.dll">
+        <Link>Smited.Daemon.Owo.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(_OwoBinDir)Smited.Daemon.Owo.pdb">
+        <Link>Smited.Daemon.Owo.pdb</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(_OwoBinDir)OWO.dll">
+        <Link>OWO.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
     </ItemGroup>
-    <Copy SourceFiles="@(_OwoNewFiles)"
-          DestinationFolder="$(OutDir)"
-          SkipUnchangedFiles="true" />
+    <PropertyGroup>
+      <_OwoBackendRuntimeResolved>true</_OwoBackendRuntimeResolved>
+    </PropertyGroup>
   </Target>
 
   <ItemGroup>
