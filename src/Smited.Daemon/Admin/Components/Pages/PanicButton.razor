@@ -1,10 +1,11 @@
-@inject TriggerCoordinator Coordinator
+@inject SmitedActionService Actions
 @inject PanicCounter PanicCounter
 @inject ILogger<PanicButton> Logger
 
-@*  Big red panic button. Calls TriggerCoordinator.StopAsync with All=true —
-    the same code path /panic uses. Press Esc on the page (handler in
-    Index.razor) to fire the same handler.  *@
+@*  Big red panic button. Calls SmitedActionService.PanicAsync — the same
+    facade /panic HTTP uses, so admin-fired panics get the same CRITICAL
+    log line and history rows as HTTP panics. Press Esc on the page
+    (handler in Index.razor) to fire the same handler.  *@
 
 <section style="text-align:center;margin:2rem 0">
     <button class="btn-danger" @onclick="FirePanic">PANIC — STOP ALL</button>
@@ -20,7 +21,7 @@
     {
         try
         {
-            await Coordinator.StopAsync(new BackendStopRequest(SensationId: null, All: true), default);
+            await Actions.PanicAsync(TriggerSource.Admin, peer: null, userAgent: null, default);
         }
         catch (Exception ex)
         {

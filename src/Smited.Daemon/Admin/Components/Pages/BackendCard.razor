@@ -1,6 +1,6 @@
 @implements IAsyncDisposable
 @inject EventStreamSubscriber Events
-@inject TriggerCoordinator Coordinator
+@inject SmitedActionService Actions
 @inject ILogger<BackendCard> Logger
 
 @*  Per-backend card. Shows id/kind/displayname, status pill, capabilities,
@@ -114,7 +114,7 @@
     {
         try
         {
-            await Coordinator.StopBackendAsync(Backend.Id, default);
+            await Actions.StopBackendAsync(Backend.Id, TriggerSource.Admin, default);
         }
         catch (Exception ex)
         {

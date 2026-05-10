@@ -43,6 +43,7 @@ builder.Services.AddSingleton<BackendRegistry>();
 builder.Services.AddSingleton<SensationLibrary>();
 builder.Services.AddSingleton<ConcurrencyEnforcer>();
 builder.Services.AddSingleton<TriggerCoordinator>();
+builder.Services.AddSingleton<SmitedActionService>();
 builder.Services.AddSingleton<DaemonStartTime>();
 
 builder.Services.AddSingleton<MockOwoBackend>();

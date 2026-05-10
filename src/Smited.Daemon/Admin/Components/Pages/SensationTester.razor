@@ -1,7 +1,7 @@
 @using RegisteredSensation = Smited.Daemon.Sensations.RegisteredSensation
 @inject BackendRegistry Registry
 @inject SensationLibrary Sensations
-@inject TriggerCoordinator Coordinator
+@inject SmitedActionService Actions
 
 @*  Sensation tester. Pick backend → pick sensation → FIRE. Result line
     shows accepted=true/false plus error info on rejection. Constructs
@@ -99,7 +99,7 @@
 
         try
         {
-            var outcome = await Coordinator.TriggerAsync(input, default);
+            var outcome = await Actions.TriggerAsync(input, TriggerSource.Admin, default);
             _lastResult = outcome switch
             {
                 TriggerOutcome.Accepted a =>
