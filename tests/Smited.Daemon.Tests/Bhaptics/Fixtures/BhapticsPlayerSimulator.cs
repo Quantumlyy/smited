@@ -179,7 +179,7 @@ internal sealed class BhapticsPlayerSimulator : IAsyncDisposable
                 while (!result.EndOfMessage);
 
                 ms.Position = 0;
-                var doc = JsonDocument.Parse(ms);
+                using var doc = JsonDocument.Parse(ms);
                 writer.TryWrite(doc.RootElement.Clone());
             }
         }

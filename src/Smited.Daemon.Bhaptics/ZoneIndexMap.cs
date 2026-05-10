@@ -83,7 +83,13 @@ internal static class ZoneIndexMap
 
     private static Dictionary<string, (Position, int)> BuildTable()
     {
-        var t = new Dictionary<string, (Position, int)>(StringComparer.Ordinal);
+        // OrdinalIgnoreCase mirrors TriggerCoordinator.ValidateAgainstBackend's
+        // case-insensitive zone lookup. Without that match, a trigger with
+        // a zone id that differs only by case (e.g. "VEST_FRONT_0") passes
+        // validation in the coordinator and then throws here in Resolve —
+        // surfacing as a stray SensationCancelled instead of a clean
+        // accepted=false.
+        var t = new Dictionary<string, (Position, int)>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < 20; i++)
         {
             t[$"vest_front_{i}"] = (Position.VestFront, i);

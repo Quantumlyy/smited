@@ -65,6 +65,23 @@ public class ZoneIndexMapTests
     }
 
     [Fact]
+    public void Resolve_is_case_insensitive_to_match_coordinator_validation()
+    {
+        // TriggerCoordinator.ValidateAgainstBackend builds its zone set
+        // with StringComparer.OrdinalIgnoreCase, so a trigger with
+        // "VEST_FRONT_0" passes coordinator validation. Resolve must
+        // accept the same casing or the trigger gets accepted upstream
+        // and then fails inside the backend playback task.
+        var (position, motor) = ZoneIndexMap.Resolve("VEST_FRONT_0");
+        position.Should().Be(Position.VestFront);
+        motor.Should().Be(0);
+
+        var (lp, lm) = ZoneIndexMap.Resolve("Glove_L_3");
+        lp.Should().Be(Position.GloveL);
+        lm.Should().Be(3);
+    }
+
+    [Fact]
     public void EnclosingPosition_returns_VestFront_when_only_front_zones()
     {
         ZoneIndexMap.EnclosingPosition(new[] { "vest_front_0", "vest_front_5" })

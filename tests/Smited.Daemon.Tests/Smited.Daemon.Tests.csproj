@@ -38,7 +38,7 @@
       Direct reference to Smited.Daemon.Bhaptics so the cross-platform
       protocol DTOs, PlayerClient, and ZoneIndexMap can be unit-tested
       from any OS. The daemon's reverse reference uses
-      ReferenceOutputAssembly=false so this types here aren't transitively
+      ReferenceOutputAssembly=false so these types aren't transitively
       visible through the daemon project; we need an explicit reference.
     -->
     <ProjectReference Include="..\..\src\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj" />
