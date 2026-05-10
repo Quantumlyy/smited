@@ -31,6 +31,23 @@ internal static class MicrosensationReader
     public static TimeSpan ReadDuration(MicrosensationParameters micro, string key) =>
         micro.Values.TryGetValue(key, out var v) && v is ParameterValue.Duration d ? d.Value : TimeSpan.Zero;
 
+    /// <summary>
+    /// Applies the trigger's <see cref="BackendTriggerRequest.IntensityScale"/>
+    /// to a microsensation's authored intensity. <c>scale</c> is a
+    /// 0..100 percentage; <c>null</c> means "no override, use authored
+    /// as-is." Out-of-range values are clamped before scaling so a
+    /// caller can't push effective intensity above the per-op cap.
+    /// </summary>
+    public static int ApplyIntensityScale(int authored, uint? scale)
+    {
+        if (!scale.HasValue)
+        {
+            return authored;
+        }
+        var clamped = Math.Clamp((int)scale.Value, 0, 100);
+        return (int)Math.Round(authored * clamped / 100.0);
+    }
+
     public static TimeSpan ComputeEstimatedDuration(
         BackendTriggerRequest request, PishockTransportMode mode)
     {

@@ -134,6 +134,61 @@ public class PishockBackendTests
     }
 
     [Fact]
+    public async Task TriggerAsync_applies_IntensityScale_to_authored_intensity()
+    {
+        // The coordinator forwards IntensityScale (a 0..100 percentage) to
+        // the backend so callers can attenuate a sensation at trigger time
+        // without rewriting the file. PiShock was ignoring it — a caller
+        // firing intensity_scale:10 against a 50% vibrate would still
+        // send 50% to the device.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+        });
+        await using var __ = backend;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["op"] = new ParameterValue.EnumValue(PishockOp.Vibrate.ToString()),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(100)),
+            ["intensity"] = new ParameterValue.Number(50),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "scaled",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: 10, // attenuate to 10%
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+
+        // 50 * 10 / 100 = 5
+        client.Calls[0].Intensity.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task TriggerAsync_with_no_IntensityScale_passes_authored_intensity_unchanged()
+    {
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+        });
+        await using var __ = backend;
+
+        await backend.TriggerAsync(
+            MakeRequest(PishockOp.Vibrate, durationMs: 100, intensity: 50),
+            CancellationToken.None);
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+
+        client.Calls[0].Intensity.Should().Be(50);
+    }
+
+    [Fact]
     public async Task Disposing_the_backend_does_not_throw()
     {
         var (backend, _, _) = NewBackend();

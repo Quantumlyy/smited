@@ -150,7 +150,11 @@ public sealed class PishockBackend : IHapticBackend
 
                 var op = MicrosensationReader.ReadOp(micro);
                 var duration = MicrosensationReader.ReadDuration(micro, "duration");
-                var intensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
+                var authoredIntensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
+                // Apply the trigger's runtime IntensityScale; the
+                // device sees the scaled value, not the authored one.
+                var intensity = MicrosensationReader.ApplyIntensityScale(
+                    authoredIntensity, request.IntensityScale);
 
                 _logger.LogInformation(
                     "PiShock {BackendId} step {Step}/{Total}: firing {Op} for {DurationMs}ms at {Intensity}% (sensation {SensationId})",

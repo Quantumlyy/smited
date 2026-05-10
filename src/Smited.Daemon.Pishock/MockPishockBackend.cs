@@ -209,7 +209,9 @@ public sealed class MockPishockBackend : IHapticBackend
             offset += MicrosensationReader.ReadDuration(micro, "delay_before");
             var op = MicrosensationReader.ReadOp(micro);
             var duration = MicrosensationReader.ReadDuration(micro, "duration");
-            var intensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
+            var authoredIntensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
+            var intensity = MicrosensationReader.ApplyIntensityScale(
+                authoredIntensity, request.IntensityScale);
             _logger.LogInformation(
                 "Mock PiShock {BackendId} step {Step}/{Total}: {Op} for {DurationMs}ms at {Intensity}% (offset +{OffsetMs}ms, sensation {SensationId})",
                 Id, i + 1, request.Microsensations.Count, op,
