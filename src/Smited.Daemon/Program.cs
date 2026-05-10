@@ -6,6 +6,7 @@ using ProtoValidate;
 using Serilog;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Diagnostics;
 using Smited.Daemon.Events;
@@ -46,6 +47,10 @@ builder.Services.AddSingleton<DaemonStartTime>();
 
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
+
+builder.Services.AddSingleton<BodyMapValidator>();
+builder.Services.AddSingleton<BodyMapState>();
+builder.Services.AddSingleton<IBodyMapState>(sp => sp.GetRequiredService<BodyMapState>());
 
 // Cross-platform backend factory registrations.
 builder.Services.AddSmitedBackends();
@@ -140,7 +145,8 @@ lifetime.ApplicationStarted.Register(() =>
     var dbPath = opts.History.Enabled
         ? app.Services.GetRequiredService<HistoryDbPath>().Value
         : null;
-    StartupBanner.Render(opts, registry.Count, library.Count, dbPath);
+    var bodyMapState = app.Services.GetRequiredService<IBodyMapState>();
+    StartupBanner.Render(opts, registry.Count, library.Count, dbPath, bodyMapState);
 });
 
 await app.RunAsync();

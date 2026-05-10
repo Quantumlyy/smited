@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Mock;
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Configuration;
 using Smited.Daemon.Events;
 using Smited.Daemon.Tests.Fixtures;
@@ -157,6 +158,9 @@ public class BackendBootstrapperDescriptorTests
             factories.AddRange(extraFactories);
         }
 
+        var bodyMapValidator = new BodyMapValidator();
+        var bodyMapState = new BodyMapState();
+
         var bootstrapper = new BackendBootstrapper(
             registry,
             bus,
@@ -165,6 +169,8 @@ public class BackendBootstrapperDescriptorTests
             serviceProvider,
             factories,
             additionalBackends: Array.Empty<IHapticBackend>(),
+            bodyMapValidator,
+            bodyMapState,
             NullLogger<BackendBootstrapper>.Instance);
 
         await bootstrapper.StartAsync(CancellationToken.None);

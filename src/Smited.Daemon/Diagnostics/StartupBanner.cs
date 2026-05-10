@@ -1,3 +1,4 @@
+using Smited.Daemon.BodyMap;
 using Smited.Daemon.Configuration;
 using Spectre.Console;
 
@@ -14,7 +15,8 @@ internal static class StartupBanner
         SmitedOptions options,
         int backendCount,
         int sensationCount,
-        string? historyDbPath)
+        string? historyDbPath,
+        IBodyMapState bodyMapState)
     {
         var grid = new Grid().AddColumn().AddColumn();
 
@@ -26,7 +28,14 @@ internal static class StartupBanner
             "[aquamarine1]Panic[/]",
             $"[red1]POST http://{options.BindAddress}:{options.PanicPort}/panic[/]");
 
-        grid.AddRow("[aquamarine1]Backends[/]", $"[gold1]{backendCount} registered[/]");
+        var refusedSuffix = bodyMapState.RefusedBackendCount > 0
+            ? $" ({bodyMapState.RefusedBackendCount} refused)"
+            : string.Empty;
+        grid.AddRow("[aquamarine1]Backends[/]",
+            $"[gold1]{backendCount} registered{refusedSuffix}[/]");
+
+        grid.AddRow("[aquamarine1]Body map[/]", FormatBodyMap(bodyMapState));
+
         grid.AddRow("[aquamarine1]Sensations[/]", $"[gold1]{sensationCount} loaded[/]");
         grid.AddRow(
             "[aquamarine1]History[/]",
@@ -38,5 +47,21 @@ internal static class StartupBanner
             new Panel(grid)
                 .Header("[bold mediumpurple1]smited[/]")
                 .Border(BoxBorder.Rounded));
+    }
+
+    private static string FormatBodyMap(IBodyMapState state)
+    {
+        if (state.PlacementCount == 0)
+        {
+            return "[grey]Not configured (warnings off)[/]";
+        }
+
+        var warnSuffix = state.WarningCount switch
+        {
+            0 => string.Empty,
+            1 => ", 1 warning",
+            _ => $", {state.WarningCount} warnings",
+        };
+        return $"[gold1]{state.PlacementCount} placements{warnSuffix}[/]";
     }
 }
