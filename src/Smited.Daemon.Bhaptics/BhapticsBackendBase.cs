@@ -407,7 +407,9 @@ public abstract class BhapticsBackendBase : IHapticBackend
             Time.GetUtcNow(),
             request.SensationId,
             request.SensationName,
-            request.ClientTraceId));
+            request.ClientTraceId,
+            request.ZoneIds,
+            request.IntensityScale));
 
         Logger.LogInformation(
             "bHaptics backend {Id} firing {SensationId} ({SensationName}) on {Zones} for {Duration}",

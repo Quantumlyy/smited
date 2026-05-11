@@ -134,6 +134,37 @@ public class MockOwoBackendTests
     }
 
     [Fact]
+    public async Task SensationStarted_event_carries_request_zones_and_intensity()
+    {
+        var backend = NewBackend(out _);
+        await using var ____ = backend;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(50),
+            ["intensity"] = new ParameterValue.Number(50),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(500)),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "scoped",
+            SensationName: "diag",
+            ZoneIds: new[] { "pectoral_l", "abdominal_r" },
+            IntensityScale: 75u,
+            Priority: 0,
+            ClientTraceId: "trace-zones",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+
+        var enumerator = backend.Events.GetAsyncEnumerator();
+        var evt = await NextWithin(enumerator, TimeSpan.FromSeconds(1));
+        var started = evt.Should().BeOfType<SensationStarted>().Which;
+
+        started.ZoneIds.Should().Equal("pectoral_l", "abdominal_r");
+        started.IntensityPercent.Should().Be(75u);
+    }
+
+    [Fact]
     public async Task Stop_cancels_active_sensation_and_emits_Cancelled()
     {
         var backend = NewBackend(out _);

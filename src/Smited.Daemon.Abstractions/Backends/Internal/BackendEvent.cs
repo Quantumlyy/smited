@@ -13,7 +13,9 @@ public sealed record SensationStarted(
     DateTimeOffset Timestamp,
     string SensationId,
     string? SensationName,
-    string ClientTraceId) : BackendEvent(BackendId, Timestamp);
+    string ClientTraceId,
+    IReadOnlyList<string> ZoneIds,
+    uint? IntensityPercent) : BackendEvent(BackendId, Timestamp);
 
 public sealed record SensationCompleted(
     string BackendId,

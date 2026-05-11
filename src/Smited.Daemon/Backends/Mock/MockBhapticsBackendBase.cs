@@ -171,7 +171,9 @@ public abstract class MockBhapticsBackendBase : IHapticBackend, IMockBhapticsCon
             _time.GetUtcNow(),
             request.SensationId,
             request.SensationName,
-            request.ClientTraceId));
+            request.ClientTraceId,
+            request.ZoneIds,
+            request.IntensityScale));
 
         _logger.LogInformation(
             "Mock bHaptics {DeviceKey} firing {SensationId} ({SensationName}) on {Zones} for {Duration}",

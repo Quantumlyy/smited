@@ -144,7 +144,8 @@ public sealed class MockPishockBackend : IHapticBackend
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),
-            request.SensationId, request.SensationName, request.ClientTraceId));
+            request.SensationId, request.SensationName, request.ClientTraceId,
+            request.ZoneIds, request.IntensityScale));
 
         // Log each microsensation up-front with its scheduled offset.
         // Logging during the playback task would be more faithful to the

@@ -147,7 +147,8 @@ public sealed class PishockBackend : IHapticBackend
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),
-            request.SensationId, request.SensationName, request.ClientTraceId));
+            request.SensationId, request.SensationName, request.ClientTraceId,
+            request.ZoneIds, request.IntensityScale));
 
         // Link to BOTH the caller's ct AND the backend's _disposing
         // token so disposal aborts every pending await across every

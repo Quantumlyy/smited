@@ -29,7 +29,8 @@ public class EventStreamTests
     }
 
     private static SensationStarted Started(string backendId, string id) =>
-        new(backendId, DateTimeOffset.UtcNow, id, SensationName: null, ClientTraceId: "");
+        new(backendId, DateTimeOffset.UtcNow, id, SensationName: null, ClientTraceId: "",
+            ZoneIds: Array.Empty<string>(), IntensityPercent: null);
 
     private static SensationCompleted Completed(string backendId, string id) =>
         new(backendId, DateTimeOffset.UtcNow, id, SensationName: null, ClientTraceId: "");
