@@ -99,13 +99,19 @@ public sealed class StaticBhapticsSdk : IBhapticsSdk
         if (deviceKey == "vest")
         {
             // The TactSuit vest exposes two surfaces (VestFront,
-            // VestBack); the parent PositionType.Vest is not reliable
-            // for motor-array submission per Bhaptics.Tac 1.4.2 docs.
-            // Treat the vest as "connected" if EITHER surface reports
-            // active — both should normally come up together once the
-            // Player has the device paired, but a transient single-
-            // surface drop shouldn't make the daemon flap its status.
-            return _player.IsActive(PositionType.VestFront)
+            // VestBack) AND a parent PositionType.Vest. The parent is
+            // not reliable for motor-array submission per Bhaptics.Tac
+            // 1.4.2 docs (the raw-motor API targets surfaces with
+            // byte[20] payloads each — see Submit below), but the
+            // Player can report a paired vest under any of the three
+            // values depending on firmware/Player version. Treat the
+            // vest as "connected" if ANY of the three reports active
+            // so ConnectAsync and the heartbeat don't sit permanently
+            // in Disconnected on Players that only flag the parent
+            // PositionType.Vest. A transient single-channel drop
+            // likewise doesn't make the daemon flap its status.
+            return _player.IsActive(PositionType.Vest)
+                || _player.IsActive(PositionType.VestFront)
                 || _player.IsActive(PositionType.VestBack);
         }
         var position = MapDeviceKey(deviceKey);
