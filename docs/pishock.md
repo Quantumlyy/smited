@@ -251,14 +251,24 @@ and the LAN-firmware-shape verification step.
 including PiShock pulses in flight. **Important caveat:** PiShock's
 wire protocol has no "cancel an in-progress op" message. Panic frees
 the daemon's concurrency slots and stops the playback task, but a
-pulse already in flight on the device runs to its authored duration.
-Keep `MaxDurationMs` short enough that this gap is acceptable for
-your use case.
+pulse already in flight on the device runs to its **on-wire
+effective duration**, not its authored duration.
 
-The bundled defaults (`MaxDurationMs: 1500`) give at most 1.5 seconds
-of unstoppable in-flight time. Pattern-heavy sensations split into
-many short pulses are also more responsive to panic than one long
-pulse.
+For **LAN-mode** descriptors this is the authored duration in
+milliseconds. For **Cloud-mode** descriptors, the API minimum is
+one whole second and the daemon rounds positive sub-second
+durations up before sending, so a 100ms cloud pulse fires for ~1
+second on the device regardless of the authored value. Panic
+during a 100ms cloud vibrate doesn't bound exposure at 100ms —
+it bounds at roughly 1 second. Plan `MaxDurationMs` accordingly and
+prefer LAN mode if sub-second panic responsiveness matters.
+
+The daemon defaults (`MaxDurationMs: 1500`) bound LAN-mode in-flight
+time at 1.5 seconds. Cloud-mode bounds at
+`ceil(authored_ms / 1000) * 1000`, capped at the manufacturer's 15s
+ceiling. Pattern-heavy sensations split into many short pulses are
+also more responsive to panic than one long pulse, since each pulse
+is its own independent in-flight window.
 
 ## Safety notes
 
