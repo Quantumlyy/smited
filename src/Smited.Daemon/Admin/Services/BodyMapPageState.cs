@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
 using Smited.Daemon.Events;
 
@@ -11,11 +12,17 @@ namespace Smited.Daemon.Admin.Services;
 /// renderer reads <see cref="LastFiredAt"/> at render time and computes
 /// the fade against the current clock, so the visual decay is smooth
 /// even when no events arrive between render passes.
+/// <c>ActiveSensationId</c> records which sensation owns the current
+/// active state, so that a stale <see cref="SensationCancelled"/> from
+/// a preempted sensation can't deactivate zones a newer fire already
+/// re-stamped. The field is load-bearing only while
+/// <c>IsActive=true</c>.
 /// </summary>
 internal sealed record ZoneActivity(
     bool IsActive,
     DateTimeOffset LastFiredAt,
-    uint LastIntensity);
+    uint LastIntensity,
+    string ActiveSensationId);
 
 /// <summary>
 /// Server-side state for the admin body map page. Subscribes to the
@@ -43,6 +50,7 @@ internal sealed class BodyMapPageState : IHostedService
 {
     private readonly EventBus _bus;
     private readonly TimeProvider _time;
+    private readonly BackendRegistry _registry;
     private readonly ILogger<BodyMapPageState> _log;
     private readonly object _lock = new();
     private readonly Dictionary<(string BackendId, string ZoneId), ZoneActivity> _zones = new();
@@ -51,10 +59,15 @@ internal sealed class BodyMapPageState : IHostedService
     private CancellationTokenSource? _cts;
     private Task? _consumer;
 
-    public BodyMapPageState(EventBus bus, TimeProvider time, ILogger<BodyMapPageState> log)
+    public BodyMapPageState(
+        EventBus bus,
+        TimeProvider time,
+        BackendRegistry registry,
+        ILogger<BodyMapPageState> log)
     {
         _bus = bus;
         _time = time;
+        _registry = registry;
         _log = log;
     }
 
@@ -130,34 +143,88 @@ internal sealed class BodyMapPageState : IHostedService
         {
             case SensationStarted started:
                 if (started.ZoneIds.Count == 0) break;
+                var leaves = ExpandGroups(started.BackendId, started.ZoneIds);
+                if (leaves.Count == 0) break;
                 var now = _time.GetUtcNow();
                 var intensity = started.IntensityPercent ?? 50u;
                 lock (_lock)
                 {
-                    foreach (var zoneId in started.ZoneIds)
+                    foreach (var zoneId in leaves)
                     {
                         _zones[(started.BackendId, zoneId)] = new ZoneActivity(
                             IsActive: true,
                             LastFiredAt: now,
-                            LastIntensity: intensity);
+                            LastIntensity: intensity,
+                            ActiveSensationId: started.SensationId);
                     }
                 }
                 changed = true;
                 break;
 
             case SensationCompleted completed:
-                changed = ClearActive(completed.BackendId);
+                changed = ClearActive(completed.BackendId, completed.SensationId);
                 break;
 
             case SensationCancelled cancelled:
-                changed = ClearActive(cancelled.BackendId);
+                changed = ClearActive(cancelled.BackendId, cancelled.SensationId);
                 break;
         }
 
         if (changed) StateChanged?.Invoke();
     }
 
-    private bool ClearActive(string backendId)
+    /// <summary>
+    /// Replace any zone-group ids (e.g. OWO's <c>torso</c> / <c>arms</c> /
+    /// <c>all</c>) with their member leaf zone ids and de-duplicate the
+    /// result while preserving first-seen order. Mirrors the per-backend
+    /// <c>ExpandZones</c> helpers in <c>OwoBackend</c> / <c>BhapticsBackendBase</c>.
+    /// Single-level expansion — groups containing other groups are not
+    /// flattened transitively, matching the backend implementations.
+    /// </summary>
+    /// <remarks>
+    /// If the backend has been deregistered between event publish and
+    /// consumption, or has no declared groups, the input is returned
+    /// unchanged (still de-duplicated). Any unknown IDs flow through
+    /// untouched and simply won't match a rendered leaf zone, so the
+    /// renderer's zone iteration is the final filter on what actually
+    /// shows up on the silhouette.
+    /// </remarks>
+    private IReadOnlyList<string> ExpandGroups(string backendId, IReadOnlyList<string> zoneIds)
+    {
+        var backend = _registry.TryGet(backendId);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var expanded = new List<string>(zoneIds.Count);
+
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? groupMembers = null;
+        if (backend is not null && backend.Zones.Groups.Count > 0)
+        {
+            var map = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in backend.Zones.Groups)
+            {
+                map[g.Id] = g.ZoneIds.ToArray();
+            }
+            groupMembers = map;
+        }
+
+        foreach (var id in zoneIds)
+        {
+            if (groupMembers is not null && groupMembers.TryGetValue(id, out var members))
+            {
+                foreach (var m in members)
+                {
+                    if (seen.Add(m)) expanded.Add(m);
+                }
+            }
+            else if (seen.Add(id))
+            {
+                expanded.Add(id);
+            }
+        }
+
+        return expanded;
+    }
+
+    private bool ClearActive(string backendId, string sensationId)
     {
         bool any = false;
         lock (_lock)
@@ -165,7 +232,8 @@ internal sealed class BodyMapPageState : IHostedService
             foreach (var key in _zones.Keys.Where(k => k.BackendId == backendId).ToArray())
             {
                 var prev = _zones[key];
-                if (prev.IsActive)
+                if (prev.IsActive
+                 && string.Equals(prev.ActiveSensationId, sensationId, StringComparison.Ordinal))
                 {
                     _zones[key] = prev with { IsActive = false };
                     any = true;
