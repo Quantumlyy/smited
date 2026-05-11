@@ -144,9 +144,10 @@ even when gRPC is bound to the LAN.
 ## Body Map
 
 The `/bodymap` page (linked from the header on every admin page)
-visualizes every registered backend's zones on a human silhouette
-(front and back) and pulses them in real time as sensations fire.
-Recently-fired zones fade over 3 seconds as a diagnostic heatmap.
+visualizes every registered backend's **body-frame** zones on a human
+silhouette (front and back) and pulses them in real time as
+sensations fire. Recently-fired zones fade over 3 seconds as a
+diagnostic heatmap.
 
 ### Features
 
@@ -163,10 +164,9 @@ Recently-fired zones fade over 3 seconds as a diagnostic heatmap.
   backend-tailored pulse routes through `SmitedActionService`, so
   the breaker check, history row, and event publication happen
   identically to a gRPC trigger. Each backend supplies the
-  microsensation parameters from its own `ParameterSchema` —
-  OWO uses `frequency`, bHaptics doesn't, PiShock uses **vibrate**
-  (never shock). Forbidden zones don't fire from this UI and show a
-  dashed red outline.
+  microsensation parameters from its own `ParameterSchema` — OWO
+  uses `frequency`, bHaptics doesn't. Forbidden zones don't fire
+  from this UI and show a dashed red outline.
 - **Backend filter.** The dropdown narrows the view to a single
   backend or shows every backend overlaid (each kind has its own
   color).
@@ -182,8 +182,20 @@ Recently-fired zones fade over 3 seconds as a diagnostic heatmap.
 - Green — bHaptics TactSuit (vest)
 - Amber — bHaptics TactSleeve (left and right)
 - Purple — bHaptics Tactosy for Feet (left and right)
-- Red — PiShock
 - Pink — mock backends and any kind not in the known list above
+
+### What's not on the body map yet
+
+Backends whose `ZoneTopology` advertises zones with `Frame != "body"`
+are skipped by the renderer because their coordinates aren't body
+coordinates. The current case is **PiShock**, which advertises a
+single `Frame = "device"` zone — the body placement comes from the
+bodymap descriptor (which region the shocker is strapped to), not
+from the backend's own topology. Until the renderer can project
+device-frame zones via their bodymap region (no region → display
+coord map exists today), PiShock dots don't appear on the
+silhouette. The PiShock backend still fires normally; use the
+**Sensation tester** to dispatch to it.
 
 ### Workflow: verifying a new backend's motor map
 
