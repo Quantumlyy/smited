@@ -152,7 +152,12 @@ diagrams. smited's zone→motor mapping lives in `BhapticsMotorMap`
 - **TactSuit X40**: motors 0–19 are the 20 front actuators, 20–39
   are the back. Cross-backend portable zones partition the 40 motors
   into 8 quadrants (one motor in exactly one quadrant); device-
-  specific `bhaptics_vest_*` zones cover narrower bands.
+  specific `bhaptics_vest_*` zones cover narrower bands. Internally
+  `StaticBhapticsSdk` splits each 40-byte submission into separate
+  `VestFront` (bytes 0–19) and `VestBack` (bytes 20–39) SDK calls
+  because the `Bhaptics.Tac` 1.4.2 raw-motor API addresses the two
+  vest surfaces independently — a single `PositionType.Vest`
+  submission does not reliably drive both halves of the vest.
 - **TactSleeve**: 6 motors per arm running wrist (0) → bicep (5).
   `arm_{l,r}` covers all six; `bhaptics_sleeve_{wrist,forearm,elbow,bicep}_{l,r}`
   isolate sub-regions.

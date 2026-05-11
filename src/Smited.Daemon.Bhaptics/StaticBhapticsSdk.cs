@@ -83,12 +83,30 @@ public sealed class StaticBhapticsSdk : IBhapticsSdk
     /// <inheritdoc />
     public bool IsPlayerRunning => _player is not null && _playerConnected;
 
+    // Submission keys for the two vest surfaces. Two distinct keys
+    // (not just one "vest") so each surface's submission can be
+    // tracked / stopped independently by the Player.
+    private const string VestFrontKey = "vest_front";
+    private const string VestBackKey = "vest_back";
+
     /// <inheritdoc />
     public bool IsDeviceConnected(string deviceKey)
     {
         if (_player is null)
         {
             return false;
+        }
+        if (deviceKey == "vest")
+        {
+            // The TactSuit vest exposes two surfaces (VestFront,
+            // VestBack); the parent PositionType.Vest is not reliable
+            // for motor-array submission per Bhaptics.Tac 1.4.2 docs.
+            // Treat the vest as "connected" if EITHER surface reports
+            // active — both should normally come up together once the
+            // Player has the device paired, but a transient single-
+            // surface drop shouldn't make the daemon flap its status.
+            return _player.IsActive(PositionType.VestFront)
+                || _player.IsActive(PositionType.VestBack);
         }
         var position = MapDeviceKey(deviceKey);
         return _player.IsActive(position);
@@ -102,18 +120,60 @@ public sealed class StaticBhapticsSdk : IBhapticsSdk
             throw new InvalidOperationException(
                 "StaticBhapticsSdk not initialized; call InitializeAsync first");
         }
+
+        if (deviceKey == "vest")
+        {
+            // Split the 40-byte payload across the two vest surfaces:
+            // bytes 0..19 go to VestFront, 20..39 go to VestBack. The
+            // raw-motor APIs in Bhaptics.Tac 1.4.2 take per-surface
+            // byte[20] payloads and do not support a 40-byte
+            // PositionType.Vest submission for motor-array
+            // ([README at https://www.nuget.org/packages/Bhaptics.Tac/1.4.2]),
+            // so a single Submit against PositionType.Vest silently
+            // fails to drive back-zone sensations (e.g. deploy_success
+            // hitting dorsal_l/r).
+            //
+            // BhapticsBackendBase always passes a 40-byte payload for
+            // the vest (MotorCount=40), so this length assertion holds
+            // by construction; the explicit guard prevents a future
+            // caller from feeding the SDK a wrong-length array.
+            if (motorIntensities.Length != 40)
+            {
+                throw new ArgumentException(
+                    $"Vest payload must be exactly 40 bytes, got {motorIntensities.Length}",
+                    nameof(motorIntensities));
+            }
+            var front = new byte[20];
+            var back = new byte[20];
+            Buffer.BlockCopy(motorIntensities, 0, front, 0, 20);
+            Buffer.BlockCopy(motorIntensities, 20, back, 0, 20);
+            _player.Submit(VestFrontKey, PositionType.VestFront, front, durationMs);
+            _player.Submit(VestBackKey, PositionType.VestBack, back, durationMs);
+            return;
+        }
+
         var position = MapDeviceKey(deviceKey);
         // HapticPlayer.Submit(string key, PositionType position, byte[] motorBytes, int durationMillis).
         // The "key" is a per-submission identifier the Player tracks for
-        // later StopDevice/TurnOff calls; we use the smited-side
-        // deviceKey so StopDevice can target it without bookkeeping.
+        // later StopDevice/TurnOff calls; for non-vest devices we use
+        // the smited-side deviceKey so StopDevice can target it
+        // without bookkeeping.
         _player.Submit(deviceKey, position, motorIntensities, durationMs);
     }
 
     /// <inheritdoc />
     public void StopDevice(string deviceKey)
     {
-        _player?.TurnOff(deviceKey);
+        if (_player is null) return;
+        if (deviceKey == "vest")
+        {
+            // Mirror the Submit-time split: stop both surface keys so
+            // a vest StopAsync silences front AND back actuators.
+            _player.TurnOff(VestFrontKey);
+            _player.TurnOff(VestBackKey);
+            return;
+        }
+        _player.TurnOff(deviceKey);
     }
 
     /// <inheritdoc />
@@ -135,13 +195,15 @@ public sealed class StaticBhapticsSdk : IBhapticsSdk
 
     /// <summary>
     /// Translate smited's device-key vocabulary into the SDK's
-    /// <see cref="PositionType"/> enum. Any string not in this set
+    /// <see cref="PositionType"/> enum. The vest key intentionally
+    /// has no single mapping — vest submissions route through the
+    /// VestFront/VestBack split inside <see cref="Submit"/> and
+    /// <see cref="IsDeviceConnected"/>. Any string not in this set
     /// indicates a caller bug (the backend's <c>DeviceKey</c> is fixed
     /// per concrete class).
     /// </summary>
     private static PositionType MapDeviceKey(string deviceKey) => deviceKey switch
     {
-        "vest" => PositionType.Vest,
         "sleeve_l" => PositionType.ForearmL,
         "sleeve_r" => PositionType.ForearmR,
         "feet_l" => PositionType.FootL,

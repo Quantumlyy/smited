@@ -10,6 +10,7 @@ using NSubstitute;
 using Smited.Daemon.Backends;
 using Smited.Daemon.Backends.Internal;
 using Smited.Daemon.Bhaptics;
+using Smited.Daemon.BodyMap;
 using Smited.V1;
 using Xunit;
 using ParameterValue = Smited.Daemon.Backends.Internal.ParameterValue;
@@ -73,11 +74,11 @@ public class BhapticsVestBackendTests
 
         backend.ForbiddenRegions.Should().BeEquivalentTo(new[]
         {
-            BodyMap.BodyRegion.Head,
-            BodyMap.BodyRegion.Face,
-            BodyMap.BodyRegion.Throat,
-            BodyMap.BodyRegion.Neck,
-            BodyMap.BodyRegion.ChestOverHeart,
+            BodyRegion.Head,
+            BodyRegion.Face,
+            BodyRegion.Throat,
+            BodyRegion.Neck,
+            BodyRegion.ChestOverHeart,
         });
     }
 
