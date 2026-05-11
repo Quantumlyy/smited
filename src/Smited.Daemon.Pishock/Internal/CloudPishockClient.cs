@@ -100,8 +100,18 @@ internal sealed class CloudPishockClient : IPishockClient
                 .ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
 
+            // PiShock's cloud API returns one of two accepted-status
+            // bodies depending on configuration: "Operation Succeeded."
+            // for the normal case, "Operation Attempted." when the
+            // shocker is in a less-confirmed state (e.g. firmware
+            // version doesn't echo the ack). Python-PiShock's HTTP
+            // client treats both as success — match that so a normal
+            // cloud op doesn't silently surface as a rejection
+            // (which would emit SensationCancelled and abort
+            // multi-pulse sequences mid-way).
             var ok = response.IsSuccessStatusCode
-                  && text.Contains("Operation Succeeded", StringComparison.OrdinalIgnoreCase);
+                  && (text.Contains("Operation Succeeded", StringComparison.OrdinalIgnoreCase)
+                   || text.Contains("Operation Attempted", StringComparison.OrdinalIgnoreCase));
             if (!ok)
             {
                 _logger.LogWarning(

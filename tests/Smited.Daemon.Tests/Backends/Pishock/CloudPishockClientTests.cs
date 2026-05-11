@@ -83,6 +83,23 @@ public class CloudPishockClientTests
     }
 
     [Fact]
+    public async Task SendOpAsync_treats_Operation_Attempted_response_as_accepted()
+    {
+        // The PiShock cloud API returns "Operation Attempted." for
+        // accepted ops in some configurations (the Python PiShock
+        // client treats this as a success body too). Without this,
+        // every successful cloud trigger of that shape would emit
+        // SensationCancelled and abort multi-pulse sequences mid-way.
+        var handler = new RecordingHandler(HttpStatusCode.OK, "Operation Attempted.");
+        var client = NewClient(handler);
+
+        var result = await client.SendOpAsync(PishockOp.Vibrate, 200, 30, CancellationToken.None);
+
+        result.Accepted.Should().BeTrue();
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
     public async Task SendOpAsync_treats_unexpected_body_as_failure_with_body_as_error_message()
     {
         var handler = new RecordingHandler(HttpStatusCode.OK, "Not Authorized.");
