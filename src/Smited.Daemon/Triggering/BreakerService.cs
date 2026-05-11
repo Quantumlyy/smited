@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace Smited.Daemon.Triggering;
 
 /// <summary>
@@ -16,12 +19,17 @@ namespace Smited.Daemon.Triggering;
 internal sealed class BreakerService : IBreakerService
 {
     private readonly TimeProvider _time;
+    private readonly ILogger<BreakerService> _logger;
     private readonly object _lock = new();
     private bool _tripped;
     private DateTimeOffset? _trippedAt;
     private string? _reason;
 
-    public BreakerService(TimeProvider time) => _time = time;
+    public BreakerService(TimeProvider time, ILogger<BreakerService>? logger = null)
+    {
+        _time = time;
+        _logger = logger ?? NullLogger<BreakerService>.Instance;
+    }
 
     public bool IsTripped { get { lock (_lock) { return _tripped; } } }
     public DateTimeOffset? TrippedAt { get { lock (_lock) { return _trippedAt; } } }
@@ -39,12 +47,12 @@ internal sealed class BreakerService : IBreakerService
             _reason = reason;
             snapshot = new BreakerState(true, _trippedAt, _reason);
         }
-        StateChanged?.Invoke(snapshot);
+        RaiseStateChanged(snapshot);
     }
 
     public void Rearm()
     {
-        BreakerState? snapshot = null;
+        BreakerState snapshot;
         lock (_lock)
         {
             // Re-arm on an untripped breaker is a no-op; suppressing the
@@ -60,6 +68,37 @@ internal sealed class BreakerService : IBreakerService
             _reason = null;
             snapshot = new BreakerState(false, null, null);
         }
-        StateChanged?.Invoke(snapshot);
+        RaiseStateChanged(snapshot);
+    }
+
+    /// <summary>
+    /// Invokes each <see cref="StateChanged"/> subscriber under an
+    /// individual try/catch. A throwing subscriber MUST NOT prevent the
+    /// breaker's state change from reaching other subscribers, nor
+    /// propagate back to the caller. Critical because
+    /// <c>SmitedActionService.PanicAsync</c> calls <see cref="Trip"/>
+    /// before <c>StopAsync</c>: a faulty UI subscriber (Header.razor,
+    /// SensationTester.razor) would otherwise let the trip-side effect
+    /// throw, skip the stop, and leave active sensations playing.
+    /// </summary>
+    private void RaiseStateChanged(BreakerState snapshot)
+    {
+        var handlers = StateChanged;
+        if (handlers is null)
+        {
+            return;
+        }
+        foreach (Action<BreakerState> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(snapshot);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "BreakerService subscriber threw on StateChanged; continuing with remaining subscribers");
+            }
+        }
     }
 }

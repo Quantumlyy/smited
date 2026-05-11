@@ -52,4 +52,56 @@ public class BreakerServiceTests
 
         fired.Should().BeFalse();
     }
+
+    [Fact]
+    public void Trip_swallows_subscriber_exception_and_still_records_state()
+    {
+        // SmitedActionService.PanicAsync calls Trip BEFORE StopAsync.
+        // If a Trip subscriber throws, the exception must NOT propagate
+        // out of Trip: otherwise the panic stop is skipped and active
+        // sensations keep playing. The state must also be set (so
+        // future triggers reject) and the call must return normally.
+        var time = new FakeTimeProvider();
+        var breaker = new BreakerService(time);
+        breaker.StateChanged += _ => throw new InvalidOperationException("bad subscriber");
+
+        var act = () => breaker.Trip("test");
+
+        act.Should().NotThrow();
+        breaker.IsTripped.Should().BeTrue();
+        breaker.TripReason.Should().Be("test");
+    }
+
+    [Fact]
+    public void Trip_continues_invoking_remaining_subscribers_after_a_throwing_one()
+    {
+        // Per-handler isolation: a single bad subscriber must not
+        // suppress the others. The order of subscriber invocation is
+        // delegate-registration order (Delegate.GetInvocationList), so
+        // registering the thrower first proves the loop continues
+        // after a catch.
+        var time = new FakeTimeProvider();
+        var breaker = new BreakerService(time);
+        var ok = 0;
+        breaker.StateChanged += _ => throw new InvalidOperationException("bad subscriber");
+        breaker.StateChanged += _ => Interlocked.Increment(ref ok);
+
+        breaker.Trip("test");
+
+        ok.Should().Be(1);
+    }
+
+    [Fact]
+    public void Rearm_swallows_subscriber_exception_and_still_records_state()
+    {
+        var time = new FakeTimeProvider();
+        var breaker = new BreakerService(time);
+        breaker.Trip("test");
+        breaker.StateChanged += _ => throw new InvalidOperationException("bad subscriber");
+
+        var act = () => breaker.Rearm();
+
+        act.Should().NotThrow();
+        breaker.IsTripped.Should().BeFalse();
+    }
 }
