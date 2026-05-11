@@ -58,6 +58,7 @@
     <Compile Remove="Backends\BhapticsVestBackendTests.cs" />
     <Compile Remove="Backends\BhapticsSleeveBackendTests.cs" />
     <Compile Remove="Backends\BhapticsFeetBackendTests.cs" />
+    <Compile Remove="Backends\BhapticsBackendFactoryTests.cs" />
   </ItemGroup>
 
 </Project>

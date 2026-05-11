@@ -53,6 +53,17 @@ internal static partial class BackendDescriptorValidator
             // race on Send / Stop and the device would fire whatever
             // the most-recent caller asked for.
             "owo_skin",
+            // Each bHaptics device is a singleton: one physical
+            // TactSuit X40, one left TactSleeve, one right TactSleeve,
+            // one left Tactosy for Feet, one right Tactosy for Feet.
+            // Two descriptors of the same bhaptics_* kind would
+            // compete for the same physical device's Submit / TurnOff
+            // routing through the shared HapticPlayer.
+            "bhaptics_vest",
+            "bhaptics_sleeve_l",
+            "bhaptics_sleeve_r",
+            "bhaptics_feet_l",
+            "bhaptics_feet_r",
         };
 
     /// <summary>

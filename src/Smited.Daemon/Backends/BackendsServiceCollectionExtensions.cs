@@ -131,4 +131,103 @@ internal static class BackendsServiceCollectionExtensions
             ServiceDescriptor.Singleton(typeof(IBackendFactory), factoryType));
         return services;
     }
+
+    /// <summary>
+    /// Reflectively loads the bHaptics backend's factory and SDK on
+    /// Windows hosts and registers one <see cref="IBackendFactory"/>
+    /// instance per supported kind. No-op on non-Windows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="AddOwoBackendIfWindows"/> for assembly load,
+    /// broad-catch diagnostics and atomic registration semantics.
+    /// Unlike OWO the bhaptics project hosts FIVE backend kinds
+    /// (vest, sleeve_l/r, feet_l/r) all routed through a single
+    /// <c>BhapticsBackendFactory</c> type parameterised by a
+    /// <c>kind</c> constructor argument: <c>BackendBootstrapper</c>
+    /// resolves factories by exact-match on <see cref="IBackendFactory.Kind"/>,
+    /// so each kind needs its own DI registration.
+    /// </para>
+    /// </remarks>
+    public static IServiceCollection AddBhapticsBackendIfWindows(this IServiceCollection services)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return services;
+        }
+
+        Type? factoryType;
+        Type? sdkType;
+        try
+        {
+            factoryType = Type.GetType("Smited.Daemon.Bhaptics.BhapticsBackendFactory, Smited.Daemon.Bhaptics");
+            sdkType = Type.GetType("Smited.Daemon.Bhaptics.StaticBhapticsSdk, Smited.Daemon.Bhaptics");
+        }
+        catch (Exception ex)
+        {
+            // Broad catch matches AddOwoBackendIfWindows. Any failure
+            // to resolve a bHaptics type means the assembly is unusable
+            // here — missing file, wrong architecture, missing
+            // transitive (Bhaptics.Tact.dll), etc.
+            Console.Error.WriteLine(
+                $"warn: bHaptics assembly load failed ({ex.GetType().Name}). "
+                + "Daemon will continue without bHaptics support; verify the "
+                + "Smited.Daemon.Bhaptics assembly and Bhaptics.Tact runtime files "
+                + "are present and built for the current architecture. "
+                + $"Underlying error: {ex.Message}");
+            return services;
+        }
+
+        if (factoryType is null || sdkType is null)
+        {
+            if (factoryType is not null && sdkType is null)
+            {
+                Console.Error.WriteLine(
+                    "warn: bHaptics factory type loaded but StaticBhapticsSdk did not. "
+                    + "This indicates a partial bHaptics assembly install. "
+                    + "Skipping bHaptics registration; daemon continues without "
+                    + "bHaptics support. Rebuild/republish to refresh the runtime files.");
+            }
+            else if (factoryType is null && sdkType is not null)
+            {
+                Console.Error.WriteLine(
+                    "warn: bHaptics StaticBhapticsSdk type loaded but BhapticsBackendFactory "
+                    + "did not. This indicates a partial bHaptics assembly install. "
+                    + "Skipping bHaptics registration.");
+            }
+            return services;
+        }
+
+        services.AddSingleton(typeof(IBhapticsSdk), sdkType);
+
+        // Register one factory instance per kind. ActivatorUtilities
+        // resolves IBhapticsSdk / TimeProvider / ILoggerFactory from
+        // DI; the kind constant is passed positionally as the first
+        // constructor argument (matches BhapticsBackendFactory's ctor
+        // signature exactly).
+        foreach (var kind in BhapticsKinds)
+        {
+            services.TryAddEnumerable(
+                ServiceDescriptor.Singleton<IBackendFactory>(sp =>
+                    (IBackendFactory)ActivatorUtilities.CreateInstance(sp, factoryType, kind)));
+        }
+        return services;
+    }
+
+    /// <summary>
+    /// The five real bHaptics kinds, in the same order
+    /// <c>BhapticsBackendFactory.SupportedKinds</c> exposes them.
+    /// Duplicated here so this extension does not need to reflect
+    /// the bhaptics assembly's static API just to enumerate the kind
+    /// constants; the two lists must stay in sync (covered by the
+    /// reflective-load test).
+    /// </summary>
+    private static readonly IReadOnlyList<string> BhapticsKinds = new[]
+    {
+        "bhaptics_vest",
+        "bhaptics_sleeve_l",
+        "bhaptics_sleeve_r",
+        "bhaptics_feet_l",
+        "bhaptics_feet_r",
+    };
 }

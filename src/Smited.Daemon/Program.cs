@@ -36,6 +36,12 @@ builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configurati
 
 builder.Services.Configure<SmitedOptions>(builder.Configuration.GetSection("Smited"));
 
+// Daemon-wide bHaptics settings. Distinct from per-backend options
+// (BhapticsVestOptions etc.) because the bHaptics SDK is a process-wide
+// singleton and its identity is decided once at first InitializeAsync —
+// see BhapticsGlobalOptions remarks.
+builder.Services.Configure<BhapticsGlobalOptions>(builder.Configuration.GetSection("Smited:Bhaptics"));
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<IBackendEventSink>(sp => sp.GetRequiredService<EventBus>());
@@ -64,6 +70,12 @@ builder.Services.AddSmitedBackends();
 // the legacy SmitedOptions.Backends.Owo singleton registration is
 // no longer needed.
 builder.Services.AddOwoBackendIfWindows();
+
+// Same shape for bHaptics: one factory class instance per supported
+// kind (vest, sleeve_l/r, feet_l/r) gets registered on Windows hosts;
+// all five share a single StaticBhapticsSdk singleton because the
+// bHaptics Player is a per-host process owning every paired device.
+builder.Services.AddBhapticsBackendIfWindows();
 
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE
