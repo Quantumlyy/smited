@@ -100,11 +100,23 @@ Backends    2 registered (pishock × 2)
 Body map    2 placements
 ```
 
-If the banner shows zero PiShock backends, check the log for
-`Factory for kind pishock declined to create descriptor` — that means
-options validation failed. The factory throws
-`BackendConfigurationException` naming the missing or out-of-range
-field; fix the config and restart.
+If the daemon refuses to start with a
+`BackendConfigurationException`, options validation rejected one of
+the descriptor's fields. The exception's message names the field
+and the value (e.g. `DevicePort=0 is out of range; must be 1..65535`).
+The bootstrapper rethrows these untouched so startup aborts rather
+than continuing without the misconfigured backend — fix the option
+and rerun.
+
+If the daemon starts but the banner shows zero PiShock backends,
+check the config: a typo in `Kind` (must be `pishock` or
+`mock_pishock`, case-insensitive) shows up as `No factory registered
+for backend kind <typo>` and `Enabled: false` on every descriptor
+silently skips them at boot. PiShock factories never decline (return
+null) — they always either register or throw, so the
+`Factory for kind ... declined to create descriptor` log line that
+applies to platform-conditional backends like OWO will not appear
+for PiShock.
 
 ## 3. Verify backends are READY via gRPC
 
