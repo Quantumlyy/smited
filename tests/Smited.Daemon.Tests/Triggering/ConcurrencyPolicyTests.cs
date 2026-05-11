@@ -123,7 +123,7 @@ public class ConcurrencyPolicyTests
         registry.Register(backend);
 
         var coordinator = new TriggerCoordinator(
-            registry, library, concurrency, new BodyMapState(), time,
+            registry, library, concurrency, new BodyMapState(), new BreakerService(time), time,
             NullLogger<TriggerCoordinator>.Instance);
 
         return new System(coordinator, backend, time);

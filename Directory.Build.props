@@ -14,16 +14,19 @@
     True when the current build/publish is *targeting* Windows, regardless
     of host OS. The Cake `Publish-Win-x64` task runs `dotnet publish -r
     win-x64` from any host (CI Linux, dev Macs, Windows release boxes), so
-    gating Windows-only artifacts on `$(OS) == 'Windows_NT'` (the host)
-    silently dropped the OWO backend from cross-published binaries. Two
-    activations:
+    gating Windows-only artifacts on the host alone silently dropped the
+    OWO backend from cross-published binaries. Two activations:
       * host is Windows (no RID needed → assume targeting Windows);
       * an explicit `win-*` RuntimeIdentifier was passed (cross-publish).
+    Use `[MSBuild]::IsOSPlatform(Windows)` for the host check rather than
+    `$(OS) == 'Windows_NT'`: the latter doesn't reliably evaluate true in
+    Rider's Debug+AnyCPU run configuration, which produced builds without
+    OWO support even on Windows hosts.
     Every csproj that conditionally includes the OWO backend reads this.
   -->
   <PropertyGroup>
     <_TargetingWindows>false</_TargetingWindows>
-    <_TargetingWindows Condition="'$(OS)' == 'Windows_NT'">true</_TargetingWindows>
+    <_TargetingWindows Condition="'$([MSBuild]::IsOSPlatform(`Windows`))' == 'true'">true</_TargetingWindows>
     <_TargetingWindows Condition="'$(RuntimeIdentifier)' != '' and $(RuntimeIdentifier.StartsWith('win'))">true</_TargetingWindows>
   </PropertyGroup>
 

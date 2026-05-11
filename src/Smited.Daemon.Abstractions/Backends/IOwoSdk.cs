@@ -15,12 +15,20 @@ namespace Smited.Daemon.Backends;
 public interface IOwoSdk
 {
     /// <summary>
-    /// Establishes the SDK identity for this process. Maps the supplied
-    /// <paramref name="projectId"/> onto the SDK's <c>GameAuth.WithId</c>
-    /// so multi-app MyOWO setups can disambiguate. Idempotent — safe to
-    /// call again on reconnect.
+    /// Configure the SDK with a project ID and optional baked-sensation
+    /// auth string. Must be called before <see cref="ConnectAsync"/> /
+    /// <see cref="AutoConnectAsync"/>. Idempotent — safe to call again
+    /// on reconnect.
     /// </summary>
-    void Configure(string projectId);
+    /// <param name="projectId">Project identifier registered with OWO,
+    /// or a placeholder string for dev work against the OWO
+    /// Visualizer.</param>
+    /// <param name="authString">Optional <c>.owoauth</c> contents. When
+    /// null, the SDK is configured with no baked sensations — fine for
+    /// the OWO Visualizer; not enough for the MyOWO consumer app, which
+    /// requires a registered project ID and signed auth string per the
+    /// OWO docs.</param>
+    void Configure(string projectId, string? authString);
 
     /// <summary>
     /// Connect to the MyOWO app at the given IP. Throws on transport

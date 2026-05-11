@@ -34,7 +34,50 @@ public sealed class OwoBackendOptions
     /// <summary>
     /// Display name registered with the MyOWO app's "Scan Games" panel.
     /// </summary>
+    /// <remarks>
+    /// As of the GameAuth refactor (the project ID is now carried by
+    /// <see cref="ProjectId"/>), this field is purely cosmetic — it
+    /// surfaces in daemon log lines so multi-OWO setups can disambiguate
+    /// each instance in human-readable form. The SDK's
+    /// <c>GameAuth.WithId</c> takes <see cref="ProjectId"/>, not this.
+    /// </remarks>
     public string GameDisplayName { get; set; } = "smited haptic daemon";
+
+    /// <summary>
+    /// Project ID used to identify smited to the OWO app.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the OWO Visualizer (the canonical dev path), any non-empty
+    /// string is accepted. The default <c>"smited-dev"</c> works out of
+    /// the box.
+    /// </para>
+    /// <para>
+    /// For the MyOWO consumer app (production), this must be a project
+    /// ID assigned by OWO. Email <c>devs@owogame.com</c> per the OWO
+    /// docs to register a project; see <c>docs/owo.md</c>.
+    /// </para>
+    /// </remarks>
+    public string ProjectId { get; set; } = "smited-dev";
+
+    /// <summary>
+    /// Optional path to a <c>.owoauth</c> file (from the OWO Sensations
+    /// Creator tool, or supplied by OWO when a project is registered).
+    /// When set, the file's contents are passed to <c>GameAuth.Parse</c>,
+    /// producing an auth with baked sensations. When unset, the SDK is
+    /// configured with no baked sensations — sufficient for the
+    /// Visualizer; not enough for MyOWO.
+    /// </summary>
+    public string? AuthFilePath { get; set; }
+
+    /// <summary>
+    /// Inline <c>.owoauth</c> string. Mutually exclusive with
+    /// <see cref="AuthFilePath"/>; when both are set,
+    /// <see cref="AuthFilePath"/> wins and a warning is logged. Useful
+    /// for tests or for keeping auth out of the filesystem in
+    /// containerized deployments.
+    /// </summary>
+    public string? AuthString { get; set; }
 
     /// <summary>
     /// Optional manually-specified IP for the MyOWO app, bypassing
@@ -57,6 +100,21 @@ public sealed class OwoBackendOptions
     /// transport drops faster at the cost of more polling work. Default 5.
     /// </summary>
     public int HeartbeatSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Maximum time the daemon waits for the OWO SDK's connect handshake
+    /// to complete before declaring the backend
+    /// <c>BackendStatus.Disconnected</c> and continuing daemon startup.
+    /// The heartbeat loop continues attempting reconnect in the background;
+    /// the backend may transition to <c>BackendStatus.Ready</c> later
+    /// without a daemon restart. Default 10 seconds.
+    /// </summary>
+    /// <remarks>
+    /// Set to 0 to disable the deadline (block startup until the SDK
+    /// responds — the pre-fix behavior). Useful for headless test fixtures
+    /// with a known-responsive mock SDK.
+    /// </remarks>
+    public int ConnectTimeoutSeconds { get; set; } = 10;
 
     /// <summary>
     /// True when <see cref="ManualIp"/> is unset (use auto-connect) or

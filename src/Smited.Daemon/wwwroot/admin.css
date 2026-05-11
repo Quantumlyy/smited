@@ -1,0 +1,111 @@
+:root {
+    color-scheme: dark;
+    --bg: #0c0c0c;
+    --fg: #d4d4d4;
+    --muted: #888;
+    --accent: #5e9eff;
+    --ok: #6ec96e;
+    --warn: #d2b14a;
+    --err: #d24a4a;
+    --card: #161616;
+    --border: #2a2a2a;
+}
+
+body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                 Roboto, sans-serif;
+    margin: 0;
+}
+
+.container {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
+h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem 0; color: var(--muted); }
+
+#blazor-error-ui {
+    background: var(--err);
+    color: #fff;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0,0,0,0.2);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+#blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 0.75rem; top: 0.5rem; }
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+}
+.pill { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+.pill-ok   { background: rgba(110,201,110,0.15); color: var(--ok); }
+.pill-warn { background: rgba(210,177,74,0.15); color: var(--warn); }
+.pill-err  { background: rgba(210,74,74,0.15);  color: var(--err); }
+.pill-mute { background: rgba(136,136,136,0.15); color: var(--muted); }
+button { font: inherit; cursor: pointer; }
+.btn-primary {
+    background: var(--accent); color: #fff; border: 0; border-radius: 4px;
+    padding: 0.5rem 1rem;
+}
+.btn-danger {
+    background: var(--err); color: #fff; border: 0; border-radius: 6px;
+    padding: 1rem 2rem; font-weight: 700;
+}
+.btn-secondary {
+    background: transparent; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.5rem 1rem;
+}
+
+/* Daemon-wide circuit-breaker banner. Appears under the Header card
+   when the breaker is tripped (panic latched). The "Re-arm" button
+   inside opens RearmDialog. */
+.banner-tripped {
+    background: rgba(210,74,74,0.12);
+    border: 1px solid var(--err);
+    color: var(--err);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Modal backdrop + card used by RearmDialog. Plain inline styling on
+   the dialog itself; the backdrop intercepts off-modal clicks to
+   dismiss. Z-index sits above the Blazor error UI bar so the dialog
+   isn't clipped if the error bar surfaces. */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.modal-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    max-width: 32rem;
+    width: 90%;
+}
+.error { color: var(--err); }
+:root {
+    --muted-bg: #1f1f1f;
+}

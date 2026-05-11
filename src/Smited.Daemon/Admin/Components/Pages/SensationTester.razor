@@ -1,0 +1,204 @@
+@implements IDisposable
+@using RegisteredSensation = Smited.Daemon.Sensations.RegisteredSensation
+@inject BackendRegistry Registry
+@inject SensationLibrary Sensations
+@inject SmitedActionService Actions
+@inject IBreakerService Breaker
+
+@*  Sensation tester. Pick backend → pick sensation → FIRE. Result line
+    shows accepted=true/false plus error info on rejection. Constructs
+    ResolvedTriggerInput in-process and dispatches through
+    SmitedActionService so the admin path produces the same history
+    rows the gRPC path does.
+
+    The FIRE button is also disabled when the daemon-wide breaker is
+    tripped. The coordinator already rejects with a BREAKER_TRIPPED
+    message so a click would round-trip and surface as a rejection,
+    but disabling the button up-front gives clearer UX and matches
+    the muted helper text below it.  *@
+
+<section class="card">
+    <h2>Sensation tester</h2>
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end">
+        <div>
+            <label>Backend</label><br />
+            <select @bind="_selectedBackendId" @bind:after="OnBackendChanged">
+                @foreach (var backend in Registry.All)
+                {
+                    <option value="@backend.Id">@backend.Id (@backend.Kind)</option>
+                }
+            </select>
+        </div>
+
+        <div>
+            <label>Sensation</label><br />
+            <select @bind="_selectedSensationName">
+                @foreach (var sensation in _sensations)
+                {
+                    <option value="@sensation.Name">@sensation.Name — @sensation.DisplayName</option>
+                }
+            </select>
+        </div>
+
+        <details style="margin-left:1rem">
+            <summary style="cursor:pointer;color:var(--muted)">Overrides</summary>
+            <div style="display:flex;gap:1rem;margin-top:0.5rem">
+                <label>
+                    Intensity scale (%): <input type="number" min="0" max="100" step="1" placeholder="default" @bind="_intensityScalePct" style="width:5rem" />
+                </label>
+                <label>
+                    Priority: <input type="number" @bind="_priority" style="width:4rem" />
+                </label>
+                <label>
+                    Trace ID: <input type="text" @bind="_traceId" style="width:18rem" />
+                </label>
+            </div>
+        </details>
+
+        <button class="btn-primary" @onclick="Fire"
+                disabled="@(_breakerTripped || string.IsNullOrEmpty(_selectedSensationName))">FIRE</button>
+    </div>
+
+    @if (_breakerTripped)
+    {
+        <p style="color:var(--muted);font-size:0.85rem;margin-top:0.5rem">
+            Panic latched. Re-arm via the header banner to resume.
+        </p>
+    }
+
+    @if (_lastResult is not null)
+    {
+        <pre style="margin-top:1rem;white-space:pre-wrap;color:@(_lastResult.Accepted ? "var(--ok)" : "var(--err)")">@_lastResult.Text</pre>
+    }
+</section>
+
+@code {
+    private string? _selectedBackendId;
+    private string? _selectedSensationName;
+    // Nullable: null means "no override; coordinator applies the
+    // sensation's authored default_intensity". Eager-defaulting to a
+    // plausible-looking 100 erased the distinction between "no
+    // override" and "override to max" — see Round-N+2 fix #1.
+    private uint? _intensityScalePct;
+    private int _priority;
+    // The auto-generated GUID we last seeded the trace-id field with.
+    // After a successful fire we only roll the field forward when it
+    // still matches this — i.e. the user didn't type a value of their
+    // own. Repeating the same user-typed trace id across multiple fires
+    // is a real workflow ("trigger this sensation three times under
+    // the same trace") that an unconditional regenerate would break.
+    private string _autoTraceId = Guid.NewGuid().ToString("n");
+    private string _traceId = "";
+    private IReadOnlyList<RegisteredSensation> _sensations = Array.Empty<RegisteredSensation>();
+    private FireResult? _lastResult;
+    private bool _breakerTripped;
+
+    protected override void OnInitialized()
+    {
+        _traceId = _autoTraceId;
+        _selectedBackendId = Registry.All.FirstOrDefault()?.Id;
+        ReloadSensations();
+        _selectedSensationName = _sensations.FirstOrDefault()?.Name;
+        _breakerTripped = Breaker.IsTripped;
+        Breaker.StateChanged += OnBreakerStateChanged;
+    }
+
+    private void OnBreakerStateChanged(BreakerState state)
+    {
+        _breakerTripped = state.IsTripped;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Breaker.StateChanged -= OnBreakerStateChanged;
+    }
+
+    private void OnBackendChanged()
+    {
+        ReloadSensations();
+        _selectedSensationName = _sensations.FirstOrDefault()?.Name;
+    }
+
+    private void ReloadSensations()
+    {
+        _sensations = string.IsNullOrEmpty(_selectedBackendId)
+            ? Array.Empty<RegisteredSensation>()
+            : Sensations.List(_selectedBackendId, tags: null);
+    }
+
+    private async Task Fire()
+    {
+        if (string.IsNullOrEmpty(_selectedBackendId) || string.IsNullOrEmpty(_selectedSensationName))
+            return;
+
+        var input = BuildInput(
+            backendId: _selectedBackendId,
+            sensationName: _selectedSensationName,
+            intensityScalePct: _intensityScalePct,
+            priority: _priority,
+            traceId: _traceId);
+
+        try
+        {
+            var outcome = await Actions.TriggerAsync(input, TriggerSource.Admin, default);
+            _lastResult = outcome switch
+            {
+                TriggerOutcome.Accepted a =>
+                    new FireResult(true,
+                        $"accepted=true sensation_id={a.SensationId} trace={a.ClientTraceId} zones=[{string.Join(",", a.ResolvedZoneIds)}] intensity={a.ResolvedIntensityScale}"),
+                TriggerOutcome.Rejected r =>
+                    new FireResult(false,
+                        $"accepted=false code={r.Code} field={r.Field ?? "<none>"} message={r.Message}"),
+                _ => new FireResult(false, $"unexpected outcome: {outcome.GetType().Name}"),
+            };
+        }
+        catch (Exception ex)
+        {
+            _lastResult = new FireResult(false, $"exception: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // Roll the trace ID after each fire so the next press uses a
+        // fresh value, unless the user typed their own value in. We
+        // detect that by checking whether the field still matches the
+        // last GUID we auto-seeded; if it doesn't, the user wants
+        // their own trace id to persist across repeat fires.
+        if (string.Equals(_traceId, _autoTraceId, StringComparison.Ordinal))
+        {
+            _autoTraceId = Guid.NewGuid().ToString("n");
+            _traceId = _autoTraceId;
+        }
+    }
+
+    /// <summary>
+    /// Builds the <see cref="ResolvedTriggerInput"/> the FIRE button hands
+    /// to <see cref="SmitedActionService"/>. Pure (no component state, no
+    /// DI) so it is unit-testable.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="intensityScalePct"/> is nullable: <c>null</c> means
+    /// "no override; coordinator applies the sensation's authored
+    /// default_intensity." When the user supplies a value, it is clamped
+    /// to the wire contract's 0..100 range. Out-of-process clients can't
+    /// send values &gt;100 (protovalidate rejects them); the admin UI
+    /// must not either, or its results aren't reproducible via gRPC and
+    /// may exceed a user's calibration ceiling on real hardware.
+    /// </remarks>
+    internal static ResolvedTriggerInput BuildInput(
+        string backendId,
+        string sensationName,
+        uint? intensityScalePct,
+        int priority,
+        string? traceId) =>
+        new(
+            BackendId: backendId,
+            SensationName: sensationName,
+            InlineMicrosensations: null,
+            ZoneIds: Array.Empty<string>(),
+            IntensityScale: intensityScalePct is uint v ? Math.Clamp(v, 0u, 100u) : (uint?)null,
+            Priority: priority,
+            ClientTraceId: string.IsNullOrEmpty(traceId) ? Guid.NewGuid().ToString("n") : traceId);
+
+    private sealed record FireResult(bool Accepted, string Text);
+}

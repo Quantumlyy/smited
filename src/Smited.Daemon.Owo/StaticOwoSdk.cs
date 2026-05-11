@@ -23,13 +23,27 @@ namespace Smited.Daemon.Owo;
 public sealed class StaticOwoSdk : IOwoSdk
 {
     /// <inheritdoc />
-    public void Configure(string projectId)
+    public void Configure(string projectId, string? authString)
     {
-        // GameAuth.Create() with no baked sensations is the right
-        // factory for the dynamic-sensation flow smited uses; .WithId
-        // tags the daemon for MyOWO's connection list. The SDK accepts
-        // arbitrary strings here.
-        var auth = GameAuth.Create().WithId(projectId);
+        // Dev path (Visualizer) and production path (MyOWO consumer app)
+        // diverge here:
+        //   * GameAuth.Create() yields auth with no baked sensations.
+        //     The OWO Visualizer accepts this, so it's enough for dev.
+        //     MyOWO ignores unsigned auth and never lists the game in
+        //     "Scan Games" — which is why the original implementation
+        //     happened to work against the Visualizer but failed
+        //     silently against MyOWO.
+        //   * GameAuth.Parse(authString) yields auth with the baked
+        //     sensations encoded in the .owoauth file from OWO's
+        //     Sensations Creator tool. Required for the MyOWO consumer
+        //     app per the OWO docs:
+        //     https://owo-game.gitbook.io/owo-api/welcome/configure-your-project
+        // Either way we end with .WithId(projectId) so the project ID
+        // we advertise is the descriptor's, regardless of what the auth
+        // string itself encodes.
+        var auth = !string.IsNullOrEmpty(authString)
+            ? GameAuth.Parse(authString).WithId(projectId)
+            : GameAuth.Create().WithId(projectId);
         OWO.Configure(auth);
     }
 

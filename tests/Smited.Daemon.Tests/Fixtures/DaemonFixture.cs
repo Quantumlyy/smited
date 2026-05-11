@@ -151,6 +151,12 @@ internal sealed class DaemonFixture : IDisposable
     /// <summary>The shared <see cref="FakeTimeProvider"/>.</summary>
     public FakeTimeProvider Time { get; }
 
+    /// <summary>
+    /// Root <see cref="IServiceProvider"/> for tests that need to resolve
+    /// services not exposed via dedicated typed properties.
+    /// </summary>
+    public IServiceProvider Services => _factory.Services;
+
     /// <summary>gRPC client wired to the in-process server.</summary>
     public SmitedService.SmitedServiceClient Client { get; }
 

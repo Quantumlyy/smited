@@ -2,30 +2,30 @@
   "name": "test_failed",
   "backend_kind": "owo_skin",
   "display_name": "Test Failed",
-  "description": "Two-pulse hit on the abdomen — your test just went red.",
+  "description": "Two firm pulses on the abdomen — a test went red.",
   "tags": ["build", "test", "failure"],
   "default_zone_ids": ["abdominal_l", "abdominal_r"],
-  "default_intensity": 70,
-  "estimated_duration": "0.7s",
+  "default_intensity": 75,
+  "estimated_duration": "0.58s",
   "definition": {
     "microsensations": [
       {
         "parameters": {
-          "frequency": { "number": 80 },
-          "intensity": { "number": 70 },
-          "duration": { "duration": "0.2s" },
-          "ramp_up": { "duration": "0.03s" },
-          "ramp_down": { "duration": "0.05s" }
+          "frequency": { "number": 75 },
+          "intensity": { "number": 75 },
+          "duration": { "duration": "0.18s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.04s" }
         }
       },
       {
         "parameters": {
-          "frequency": { "number": 80 },
-          "intensity": { "number": 70 },
-          "duration": { "duration": "0.2s" },
-          "ramp_up": { "duration": "0.03s" },
-          "ramp_down": { "duration": "0.05s" },
-          "exit_delay": { "duration": "0.15s" }
+          "frequency": { "number": 75 },
+          "intensity": { "number": 75 },
+          "duration": { "duration": "0.18s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.04s" },
+          "exit_delay": { "duration": "0.1s" }
         }
       }
     ]

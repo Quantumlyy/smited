@@ -10,16 +10,24 @@ cd smited
 dotnet run --project src/Smited.Daemon
 ```
 
-The daemon binds gRPC on `127.0.0.1:7777` (h2c) and an emergency-stop HTTP endpoint on `127.0.0.1:7778`. The startup banner shows both:
+The daemon binds:
+
+- gRPC on `127.0.0.1:7777` (h2c)
+- Emergency-stop HTTP on `127.0.0.1:7778`
+- **Admin UI on `127.0.0.1:7779` — open in browser to verify end-to-end**
+
+The startup banner shows all three:
 
 ```
-╭─smited──────────────────────────────────────────────╮
-│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)│
-│ Panic       POST http://127.0.0.1:7778/panic        │
-│ Backends    1 registered                            │
-│ Body map    Not configured (warnings off)           │
-│ Sensations  5 loaded                                │
-╰─────────────────────────────────────────────────────╯
+╭─smited──────────────────────────────────────────────────╮
+│ Listening   gRPC 127.0.0.1:7777 (h2c, reflection on)    │
+│ Panic       POST http://127.0.0.1:7778/panic            │
+│ Admin       http://127.0.0.1:7779/                      │
+│ Backends    1 registered                                │
+│ Body map    Not configured (warnings off)               │
+│ Sensations  5 loaded                                    │
+│ History     /Users/.../smited/history.db                │
+╰─────────────────────────────────────────────────────────╯
 ```
 
 Verify with `grpcurl` (install via `brew install grpcurl`):
@@ -58,11 +66,12 @@ See [`docs/building.md`](docs/building.md) for the full Cake target list.
 - [`docs/pishock.md`](docs/pishock.md) — PiShock setup (cloud and LAN), AllowedOps semantics, sensation authoring, safety notes.
 - [`docs/pishock-smoke.md`](docs/pishock-smoke.md) — PiShock smoke-test runbook (scratch app + step-by-step verification).
 - [`docs/history.md`](docs/history.md) — the daemon's SQLite history database: tables, queries, retention.
+- [`docs/admin.md`](docs/admin.md) — the in-process Blazor Server admin UI on port 7779 (smoke-test surface).
 - [`sensations/README.md`](sensations/README.md) — sensation file format reference.
 
 ## Status
 
-This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. Two real backends ship today: the Windows-only OWO Skin backend in `src/Smited.Daemon.Owo/` (wired against the official OWO C# SDK — see [`docs/owo.md`](docs/owo.md)) and the cross-platform PiShock backend in `src/Smited.Daemon.Pishock/` with cloud and LAN transports (see [`docs/pishock.md`](docs/pishock.md) and the smoke-test runbook). The daemon is LAN/localhost only — no TLS, no auth.
+This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint (latching circuit breaker with challenge-response rearm), the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement, and a Blazor Server admin UI on port 7779 for end-to-end smoke testing. Two real backends ship today: the Windows-only OWO Skin backend in `src/Smited.Daemon.Owo/` (wired against the official OWO C# SDK — for development, the canonical target is the **OWO Visualizer** downloadable from `owogame.com/developers/`; the MyOWO consumer app is the production path and requires a registered project ID + `.owoauth` from `devs@owogame.com` — see [`docs/owo.md`](docs/owo.md)) and the cross-platform PiShock backend in `src/Smited.Daemon.Pishock/` with cloud and LAN transports (see [`docs/pishock.md`](docs/pishock.md) and the smoke-test runbook). The daemon is LAN/localhost only — no TLS, no auth.
 
 ## License
 

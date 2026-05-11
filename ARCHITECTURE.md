@@ -11,13 +11,13 @@ The daemon is a thin layer between gRPC clients and pluggable haptic backends. E
                 ┌────────────────────────────────────────────┐
                 │           gRPC clients (LAN/localhost)      │
                 │   Stream Deck • multiplexer • CI hook       │
-                └───────────────┬─────────────┬──────────────┘
-                                │             │ HTTP/1.1 GET/POST
-                                │ HTTP/2 h2c  │
-                ┌───────────────▼─────────────▼──────────────┐
+                └───────────────┬─────────────┬─────────┬────┘
+                                │             │ HTTP/1.1│ HTTP/1.1
+                                │ HTTP/2 h2c  │   POST  │   GET
+                ┌───────────────▼─────────────▼─────────▼────┐
                 │                Kestrel                     │
-                │   :7777 (gRPC)                :7778 (panic)│
-                └───────────────┬─────────────┬──────────────┘
+                │   :7777 gRPC   :7778 panic   :7779 admin   │
+                └───────────────┬─────────────┬─────────┬────┘
                                 │             │
               ┌─────────────────▼──┐   ┌──────▼─────────────────┐
               │ ProtovalidateInterc│   │ PanicEndpoint          │
@@ -123,11 +123,21 @@ JSON files under `LibraryRoot/<backend_kind>/*.json` are loaded at boot by `Sens
 
 `PanicEndpoint` exposes `/panic` on a separate Kestrel listener (HTTP/1.1, default port 7778). Cancels every active sensation regardless of gRPC state. No auth; LAN/localhost binding is the access control. Logs every invocation at `Critical` so post-mortems have an immediate answer to "why did everything stop".
 
-`StartupBanner` renders a Spectre.Console panel after `ApplicationStarted` showing both ports, backend count, bodymap status (`N placements[, M warning(s)]` or `Not configured (warnings off)`), and sensations loaded count. Forbidden-region errors are fatal at startup, so by the time the banner renders the bodymap is valid — there's no "refused" state to display.
+`StartupBanner` renders a Spectre.Console panel after `ApplicationStarted` showing all three listener ports (gRPC, panic, admin), backend count, bodymap status (`N placements[, M warning(s)]` or `Not configured (warnings off)`), sensation count, and history-database path (or `disabled`). Forbidden-region errors are fatal at startup, so by the time the banner renders the bodymap is valid — there's no "refused" state to display.
+
+### Admin UI (`Admin/`)
+
+Blazor Server pages on port 7779, hosted in the same `WebApplication` as the gRPC server and panic endpoint. Components inject daemon services (`BackendRegistry`, `TriggerCoordinator`, `EventBus`, `SensationLibrary`, history factory) directly — no gRPC roundtrip. Live updates ride Blazor Server's existing SignalR connection; per-component subscriptions to the in-process `EventBus` re-render on each event.
+
+This means the admin UI has access to capabilities the gRPC schema doesn't expose (history queries, internal coordinator state). When those prove useful for external clients, a future schema bump exposes them; the admin UI doesn't wait. The Kestrel listener for the admin port is gated by `Smited:Admin:Enabled` (default true) so headless deployments can omit it.
+
+Authentication is intentionally absent in v1: the admin port binds to `127.0.0.1`. The third-port architecture makes a future shared-secret middleware addition cheap (it goes in `MapWhen` on the admin branch only). See [`docs/admin.md`](docs/admin.md) for the panel reference and the no-auth caveat.
 
 ## Cross-platform conditional compilation
 
-`Smited.Daemon.Owo.csproj` targets `net9.0-windows`. Its OWO NuGet package and the SDK-touching files (`OwoBackend.cs`, `OwoBackendFactory.cs`, `StaticOwoSdk.cs`, `OwoMuscleMap.cs`) are guarded by the `_TargetingWindows` MSBuild property (defined in `Directory.Build.props`), which is true when either the host is Windows or the build was given a `win-*` `RuntimeIdentifier` — that's the correct gate for "include the Windows-only assets," and matches the Cake `Publish-Win-x64` task that runs on CI from Linux. Gating on `'$(OS)' == 'Windows_NT'` (the build host) is wrong because it silently drops the OWO assembly from cross-publishes. The daemon project's reverse `ProjectReference` is gated the same way and uses `ReferenceOutputAssembly=false` so the compile-time graph stays acyclic — `BackendsServiceCollectionExtensions.AddOwoBackendIfWindows` loads `OwoBackendFactory` and `StaticOwoSdk` via `Type.GetType("Smited.Daemon.Owo.<Type>, Smited.Daemon.Owo")` at runtime; the factory is then registered in DI for `BackendBootstrapper` to dispatch to when an `owo_skin` descriptor appears. See [`docs/adding-a-backend.md`](docs/adding-a-backend.md) for the full pattern any new platform-specific backend should follow.
+`Smited.Daemon.Owo.csproj` targets `net9.0-windows`. Its OWO NuGet package and the SDK-touching files (`OwoBackend.cs`, `OwoBackendFactory.cs`, `StaticOwoSdk.cs`, `OwoMuscleMap.cs`) are guarded by the `_TargetingWindows` MSBuild property (defined in `Directory.Build.props`), which is true when either the host is Windows (detected via `[MSBuild]::IsOSPlatform(Windows)` so Rider's Debug+AnyCPU run config also flips it) or the build was given a `win-*` `RuntimeIdentifier`. That's the correct gate for "include the Windows-only assets," and matches the Cake `Publish-Win-x64` task that runs on CI from Linux. The daemon project's reverse `ProjectReference` is gated the same way and uses `ReferenceOutputAssembly=false` so the compile-time graph stays acyclic — `BackendsServiceCollectionExtensions.AddOwoBackendIfWindows` calls `Assembly.LoadFrom(Path.Combine(AppContext.BaseDirectory, "Smited.Daemon.Owo.dll"))` and resolves `OwoBackendFactory` and `StaticOwoSdk` via `Assembly.GetType` against the loaded module. (The pre-fix `Type.GetType("type, assembly")` form silently returned null because `ReferenceOutputAssembly=false` keeps the assembly out of the daemon's `.deps.json` and the runtime resolver only probes the TPA list.) The factory is then registered in DI for `BackendBootstrapper` to dispatch to when an `owo_skin` descriptor appears. See [`docs/adding-a-backend.md`](docs/adding-a-backend.md) for the full pattern any new platform-specific backend should follow.
+
+For the OWO backend specifically, the auth surface is split: `ProjectId` is always required (any non-empty string for the OWO Visualizer dev path; the registered project ID for the MyOWO consumer app), and the optional `AuthFilePath` / `AuthString` carry a signed `.owoauth` payload that MyOWO requires. `StaticOwoSdk.Configure` calls `GameAuth.Parse(authString).WithId(projectId)` when an auth string is supplied and `GameAuth.Create().WithId(projectId)` otherwise. See [`docs/owo.md`](docs/owo.md) for the full Visualizer-vs-MyOWO setup.
 
 The `IOwoSdk` interface and the `OwoSendCommand` record live in `Smited.Daemon.Abstractions` so both the daemon host and the Windows-only OWO project can reference them without anyone forcing a Mac-side compile dependency on the Windows assembly. Tests that need to construct `OwoBackend` directly (Trigger/Stop/heartbeat behavior) take a `_TargetingWindows`-gated `ProjectReference` to `Smited.Daemon.Owo` from the test csproj and are excluded from compile when not targeting Windows.
 
