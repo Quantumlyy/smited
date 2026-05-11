@@ -76,16 +76,12 @@
 
     [Parameter] public string? BackendFilter { get; set; }
 
-    private List<RenderedZone> _frontZones = new();
-    private List<RenderedZone> _backZones = new();
+    private IReadOnlyList<RenderedZone> _frontZones = Array.Empty<RenderedZone>();
+    private IReadOnlyList<RenderedZone> _backZones = Array.Empty<RenderedZone>();
     private RenderedZone? _hovered;
     private string? _lastError;
     private BreakerState _breakerState = new(false, null, null);
     private System.Threading.Timer? _fadeTicker;
-
-    /// <summary>3-second linear fade window. After this elapsed time
-    /// the zone returns to its baseline transparency.</summary>
-    private const double FadeWindowSeconds = 3.0;
 
     protected override void OnInitialized()
     {
@@ -93,11 +89,14 @@
         _breakerState = new BreakerState(Breaker.IsTripped, Breaker.TrippedAt, Breaker.TripReason);
         Breaker.StateChanged += OnBreakerStateChanged;
         // Periodic re-render so the heatmap fade animates smoothly even
-        // when no events arrive between frames. The fade value itself
-        // is computed at render time from (now - LastFiredAt), so this
-        // is just a tick to make StateHasChanged run.
+        // when no events arrive between frames. The tick calls
+        // RebuildZones so HeatLevel is recomputed against the *current*
+        // clock — re-rendering without rebuilding would keep painting
+        // the same baked-in HeatLevel from the last state-change and
+        // the fade would never advance.
         _fadeTicker = new System.Threading.Timer(_ =>
         {
+            RebuildZones();
             _ = InvokeAsync(StateHasChanged);
         }, null, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(200));
         RebuildZones();
@@ -119,77 +118,16 @@
 
     private void RebuildZones()
     {
-        var snapshot = State.Snapshot();
-        var now = Time.GetUtcNow();
-        var front = new List<RenderedZone>();
-        var back = new List<RenderedZone>();
-
-        foreach (var backend in Registry.All)
-        {
-            if (!string.IsNullOrEmpty(BackendFilter)
-             && !string.Equals(backend.Id, BackendFilter, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            foreach (var zone in backend.Zones.Zones)
-            {
-                if (zone.Position is null)
-                {
-                    // PositionHint is nullable in the proto; if a backend
-                    // omits it we can't place the dot. Logging once per
-                    // page-load is enough — this is a backend descriptor
-                    // bug, not user-facing UX.
-                    Log.LogDebug("Zone {BackendId}/{ZoneId} has no PositionHint; skipping on body map",
-                        backend.Id, zone.Id);
-                    continue;
-                }
-
-                snapshot.TryGetValue((backend.Id, zone.Id), out var activity);
-
-                var rendered = new RenderedZone(
-                    BackendId: backend.Id,
-                    BackendKind: backend.Kind,
-                    BackendDisplayName: backend.DisplayName,
-                    ZoneId: zone.Id,
-                    ZoneDisplayName: string.IsNullOrEmpty(zone.DisplayName) ? zone.Id : zone.DisplayName,
-                    Position: zone.Position,
-                    IsActive: activity?.IsActive ?? false,
-                    HeatLevel: ComputeHeatLevel(activity, now),
-                    IsForbidden: IsZoneForbidden(backend, zone.Id));
-
-                // Z=0 is front, Z=1 is back; Z=0.5 (limbs like arms) is
-                // the side of the body. By convention we render exactly
-                // 0.5 on the front pane — limbs are visible face-on, so
-                // grouping them with the front view reads better than
-                // tucking them behind on the back pane.
-                if (zone.Position.Z <= 0.5f) front.Add(rendered);
-                else back.Add(rendered);
-            }
-        }
+        var (front, back) = BodyMapRenderModel.Build(
+            backends: Registry.All,
+            activity: State.Snapshot(),
+            bodyMap: BodyMap,
+            now: Time.GetUtcNow(),
+            backendFilter: BackendFilter,
+            log: Log);
 
         _frontZones = front;
         _backZones = back;
-    }
-
-    /// <summary>Fade is linear: 1.0 at LastFiredAt, 0.0 at LastFiredAt +
-    /// 3s. Active zones override to 1.0 regardless of age so the
-    /// "currently firing" state never reads as dim.</summary>
-    private static double ComputeHeatLevel(ZoneActivity? activity, DateTimeOffset now)
-    {
-        if (activity is null) return 0;
-        if (activity.IsActive) return 1.0;
-
-        var elapsed = (now - activity.LastFiredAt).TotalSeconds;
-        if (elapsed >= FadeWindowSeconds) return 0;
-        return 1.0 - (elapsed / FadeWindowSeconds);
-    }
-
-    private bool IsZoneForbidden(IHapticBackend backend, string zoneId)
-    {
-        if (!BodyMap.ZoneRegions.TryGetValue(backend.Id, out var zoneMap)) return false;
-        if (!zoneMap.TryGetValue(zoneId, out var region)) return false;
-        return backend.ForbiddenRegions.Contains(region);
     }
 
     /// <summary>Map body coords to SVG pixel coords inside a 300×800
