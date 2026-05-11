@@ -200,6 +200,18 @@ internal sealed class TriggerCoordinator
         {
             result = await backend.TriggerAsync(request, active.Cts.Token).ConfigureAwait(false);
         }
+        catch (BackendTriggerRejectedException rejection)
+        {
+            // Per-instance rejection that ParameterSchema-based validation
+            // upstream couldn't catch (e.g. PiShock's AllowedOps allow-list
+            // or token-bucket rate limiter). Preserve the backend-supplied
+            // code, message, and field on the wire.
+            _logger.LogInformation(
+                "Backend {BackendId} rejected trigger {SensationId}: {Code} {Message}",
+                backend.Id, sensationId, rejection.Code, rejection.Message);
+            ReleaseInternal(active);
+            return Reject(input, rejection.Code, rejection.Message, rejection.Field);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Backend {BackendId} threw while accepting trigger {SensationId}",

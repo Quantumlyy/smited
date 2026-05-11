@@ -1,6 +1,6 @@
 # Sensation library
 
-JSON files under this directory describe pre-registered sensations the daemon loads at boot. Each subdirectory is named after the backend `kind` it targets — `owo_skin/` for files that should bind to OWO Skin backends.
+JSON files under this directory describe pre-registered sensations the daemon loads at boot. Each subdirectory is named after the backend `kind` it targets — `owo_skin/` for files that should bind to OWO Skin backends, `pishock/` for files that should bind to PiShock backends, and so on.
 
 ## File format
 

@@ -1,0 +1,212 @@
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Smited.Daemon.Backends.Internal;
+using Smited.Daemon.Pishock;
+using Smited.Daemon.Pishock.Internal;
+using Smited.Daemon.Sensations;
+using Xunit;
+
+namespace Smited.Daemon.Tests.Backends.Pishock;
+
+/// <summary>
+/// Authoring-time validation of the bundled <c>sensations/pishock/*.json</c>
+/// files: every file deserializes, declares the right kind, declares
+/// only Vibrate/Beep ops (no Shock in bundled defaults), and validates
+/// against the mock backend's parameter schema. Catches authoring bugs
+/// before they reach a daemon at startup, where the only feedback would
+/// be a refused-startup error.
+/// </summary>
+public class BundledPishockSensationsTests
+{
+    private static readonly string SensationsRoot = LocateSensationsRoot();
+
+    public static IEnumerable<object[]> AllFiles =>
+        Directory.EnumerateFiles(SensationsRoot, "*.json")
+            .Select(path => new object[] { Path.GetFileName(path) });
+
+    [Theory]
+    [MemberData(nameof(AllFiles))]
+    public void File_deserializes_with_backend_kind_pishock(string filename)
+    {
+        var dto = LoadFile(filename);
+
+        dto.BackendKind.Should().Be("pishock");
+        dto.Name.Should().NotBeNullOrEmpty();
+        dto.DisplayName.Should().NotBeNullOrEmpty();
+        dto.DefaultZoneIds.Should().BeEquivalentTo(new[] { "shock" });
+        dto.Definition.Microsensations.Should().NotBeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(AllFiles))]
+    public void File_validates_against_default_pishock_parameter_schema(string filename)
+    {
+        var dto = LoadFile(filename);
+
+        // Validate using the default-options schema — i.e. AllowedOps =
+        // [Vibrate, Beep], no Shock. Any bundled sensation that needs
+        // Shock would fail here, which is intentional: the bundled
+        // library is "useful for dev workflow feedback," not
+        // "ready-to-fire pain." Users opt into Shock by enabling it in
+        // AllowedOps AND authoring their own sensations.
+        var backend = new MockPishockBackend(
+            "test-validation",
+            new PishockBackendOptions(),
+            new FakeTimeProvider(),
+            NullLogger<MockPishockBackend>.Instance);
+
+        var micros = dto.Definition.Microsensations
+            .Select(m => new MicrosensationParameters(m.Parameters))
+            .ToArray();
+
+        var failure = SensationValidator.Validate(micros, dto.DefaultZoneIds, backend);
+        failure.Should().BeNull(
+            "every bundled sensation must validate against a default mock_pishock backend "
+            + "(AllowedOps=[Vibrate, Beep]); a sensation that fails here would refuse daemon "
+            + "startup with this same error");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllFiles))]
+    public void File_estimated_duration_matches_summed_microsensation_durations(string filename)
+    {
+        var dto = LoadFile(filename);
+
+        var micros = dto.Definition.Microsensations
+            .Select(m => new MicrosensationParameters(m.Parameters))
+            .ToArray();
+        var request = new BackendTriggerRequest(
+            SensationId: "_unused",
+            SensationName: dto.Name,
+            ZoneIds: dto.DefaultZoneIds,
+            IntensityScale: null,
+            Priority: 0,
+            ClientTraceId: "_unused",
+            Microsensations: micros);
+
+        // Authored estimated_duration is transport-agnostic — it reflects
+        // the millisecond intent in the file. Use LAN mode so the helper
+        // returns ms-precise sums without applying cloud's whole-second
+        // rounding.
+        var computed = MicrosensationReader.ComputeEstimatedDuration(
+            request, PishockTransportMode.Lan);
+
+        // The authored estimated_duration drives admin-UI countdown
+        // displays and the daemon's history-row "expected" column.
+        // Drift between authored and computed makes both wrong.
+        computed.Should().Be(dto.EstimatedDuration);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllFiles))]
+    public void Trigger_without_override_fires_at_authored_intensity_no_double_scale(string filename)
+    {
+        // The coordinator applies a sensation file's default_intensity
+        // as IntensityScale when the trigger doesn't override it; the
+        // PiShock backend then multiplies the authored microsensation
+        // intensity by that scale. Bundled files setting
+        // default_intensity equal to the authored intensity would
+        // double-scale: compile_error_mild authored at 30% and
+        // default_intensity 30 would fire at 30*30/100 = 9% instead
+        // of the documented 30%.
+        //
+        // The bundled convention: default_intensity=100 (no
+        // attenuation by default), so trigger-without-override fires
+        // at the authored microsensation intensity. Override
+        // attenuates from there proportionally.
+        var dto = LoadFile(filename);
+
+        uint? resolvedIntensity = dto.DefaultIntensity;
+
+        foreach (var micro in dto.Definition.Microsensations)
+        {
+            var authored = (int)((ParameterValue.Number)micro.Parameters["intensity"]).Value;
+            var effective = MicrosensationReader.ApplyIntensityScale(authored, resolvedIntensity);
+
+            effective.Should().Be(authored,
+                "trigger-without-override on '{0}' should fire at the authored "
+                + "microsensation intensity {1}, not double-scaled",
+                filename, authored);
+        }
+    }
+
+    [Theory]
+    [InlineData("pr_merged.json")]
+    [InlineData("notification.json")]
+    public void Vibrate_only_descriptor_does_not_refuse_bundled_beep_sensations_at_load(string filename)
+    {
+        // Reproduces the original startup-abort report: a valid
+        // AllowedOps:["Vibrate"] descriptor loaded against the bundled
+        // kind-scoped library would refuse pr_merged and notification
+        // (both use the Beep op). The schema must advertise every op
+        // so SensationValidator passes at load time; AllowedOps gating
+        // is a trigger-time concern.
+        var dto = LoadFile(filename);
+        var vibrateOnly = new MockPishockBackend(
+            "vibrate-only",
+            new PishockBackendOptions
+            {
+                AllowedOps = new() { PishockOp.Vibrate },
+            },
+            new FakeTimeProvider(),
+            NullLogger<MockPishockBackend>.Instance);
+
+        var micros = dto.Definition.Microsensations
+            .Select(m => new MicrosensationParameters(m.Parameters))
+            .ToArray();
+        var failure = SensationValidator.Validate(micros, dto.DefaultZoneIds, vibrateOnly);
+
+        failure.Should().BeNull(
+            "a vibrate-only descriptor must not refuse a bundled Beep sensation at "
+            + "load — the trigger-time AllowedOps check is what rejects an attempted "
+            + "Beep fire on that descriptor, with a structured INVALID_PARAMETER");
+    }
+
+    [Fact]
+    public void Bundled_set_includes_every_planned_sensation()
+    {
+        var names = Directory.EnumerateFiles(SensationsRoot, "*.json")
+            .Select(Path.GetFileNameWithoutExtension)
+            .ToHashSet();
+
+        names.Should().BeEquivalentTo(new[]
+        {
+            "compile_error_mild",
+            "compile_error_severe",
+            "deploy_success",
+            "deploy_failure",
+            "pr_merged",
+            "notification",
+        });
+    }
+
+    private static SensationFileDto LoadFile(string filename)
+    {
+        var path = Path.Combine(SensationsRoot, filename);
+        return SensationFileSerializer.Deserialize(File.ReadAllText(path));
+    }
+
+    /// <summary>
+    /// Walks up from the test assembly's directory to find the workspace
+    /// root (marked by <c>smited.sln</c>) so the test reads the
+    /// authored files in <c>sensations/pishock/</c> rather than a copy
+    /// in the test bin. The bundled files are part of the source tree
+    /// and the test verifies the source state.
+    /// </summary>
+    private static string LocateSensationsRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "smited.sln")))
+        {
+            dir = dir.Parent;
+        }
+        if (dir is null)
+        {
+            throw new InvalidOperationException(
+                "Could not find workspace root (smited.sln) walking up from "
+                + AppContext.BaseDirectory);
+        }
+        return Path.Combine(dir.FullName, "sensations", "pishock");
+    }
+}

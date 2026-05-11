@@ -1,0 +1,21 @@
+{
+  "name": "compile_error_mild",
+  "backend_kind": "pishock",
+  "display_name": "Compile Error (Mild)",
+  "description": "Brief vibrate — light haptic confirmation of a recoverable error.",
+  "tags": ["dev", "feedback", "error", "mild"],
+  "default_zone_ids": ["shock"],
+  "default_intensity": 100,
+  "estimated_duration": "0.5s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "op":        { "enum_value": "vibrate" },
+          "duration":  { "duration":   "0.5s" },
+          "intensity": { "number":     30 }
+        }
+      }
+    ]
+  }
+}

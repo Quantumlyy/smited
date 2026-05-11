@@ -1,0 +1,21 @@
+{
+  "name": "deploy_failure",
+  "backend_kind": "pishock",
+  "display_name": "Deploy Failure",
+  "description": "Long firm vibrate — production rejected the build.",
+  "tags": ["dev", "deploy", "failure"],
+  "default_zone_ids": ["shock"],
+  "default_intensity": 100,
+  "estimated_duration": "0.8s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "op":        { "enum_value": "vibrate" },
+          "duration":  { "duration":   "0.8s" },
+          "intensity": { "number":     70 }
+        }
+      }
+    ]
+  }
+}

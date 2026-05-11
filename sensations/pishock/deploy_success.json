@@ -1,0 +1,37 @@
+{
+  "name": "deploy_success",
+  "backend_kind": "pishock",
+  "display_name": "Deploy Success",
+  "description": "Three short pulses — production caught the new build.",
+  "tags": ["dev", "deploy", "success"],
+  "default_zone_ids": ["shock"],
+  "default_intensity": 100,
+  "estimated_duration": "0.7s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "op":        { "enum_value": "vibrate" },
+          "duration":  { "duration":   "0.1s" },
+          "intensity": { "number":     50 }
+        }
+      },
+      {
+        "parameters": {
+          "op":           { "enum_value": "vibrate" },
+          "duration":     { "duration":   "0.1s" },
+          "intensity":    { "number":     50 },
+          "delay_before": { "duration":   "0.2s" }
+        }
+      },
+      {
+        "parameters": {
+          "op":           { "enum_value": "vibrate" },
+          "duration":     { "duration":   "0.1s" },
+          "intensity":    { "number":     50 },
+          "delay_before": { "duration":   "0.2s" }
+        }
+      }
+    ]
+  }
+}

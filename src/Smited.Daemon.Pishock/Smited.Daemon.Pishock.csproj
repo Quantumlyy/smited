@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Smited.Daemon.Pishock</RootNamespace>
+    <AssemblyName>Smited.Daemon.Pishock</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    PiShock is HTTP-only and runs on every supported host (Mac, Linux,
+    Windows). Unlike Smited.Daemon.Owo, no platform-conditional MSBuild
+    logic is needed: the assembly always builds, the factory always
+    registers, descriptors that don't apply simply leave it idle.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+    <!--
+      The smoke-test scratch app under scripts/pishock-smoke uses
+      CloudPishockClient and LanPishockClient directly to fire one op
+      against a real device for credential / network verification
+      before plugging the device into the daemon.
+    -->
+    <InternalsVisibleTo Include="pishock-smoke" />
+  </ItemGroup>
+
+</Project>

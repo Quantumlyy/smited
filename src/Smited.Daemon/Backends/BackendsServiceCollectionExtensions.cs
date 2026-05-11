@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Smited.Daemon.Backends.Mock;
+using Smited.Daemon.Pishock;
 
 namespace Smited.Daemon.Backends;
 
@@ -20,6 +21,14 @@ internal static class BackendsServiceCollectionExtensions
     {
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IBackendFactory, MockOwoBackendFactory>());
+        // PiShock is cross-platform and multi-instance — no platform
+        // conditional, no AddPishockBackendIfX gate. Both the mock and
+        // real factories register unconditionally; descriptors that
+        // don't apply leave them idle in DI.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IBackendFactory, MockPishockBackendFactory>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IBackendFactory, PishockBackendFactory>());
 
         // One MockBhapticsBackendFactory instance per supported kind:
         // BackendBootstrapper.ResolveFactory does FirstOrDefault on

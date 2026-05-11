@@ -1,0 +1,57 @@
+{
+  "Smited": {
+    "Backends": {
+      "Items": [
+        {
+          "Kind": "pishock",
+          "Id": "pishock-left-thigh",
+          "Enabled": true,
+          "DisplayName": "Left thigh",
+          "Options": {
+            "Mode": "Cloud",
+            "Username": "REPLACE_ME",
+            "ApiKey": "REPLACE_ME",
+            "ShareCode": "REPLACE_ME",
+            "AllowedOps": ["Vibrate", "Beep"],
+            "MaxIntensityShock": 20,
+            "MaxIntensityVibrate": 70,
+            "MaxDurationMs": 1000,
+            "MaxOpsPerSecond": 1,
+            "MaxBurst": 3
+          }
+        },
+        {
+          "Kind": "pishock",
+          "Id": "pishock-right-calf",
+          "Enabled": true,
+          "DisplayName": "Right calf",
+          "Options": {
+            "Mode": "Lan",
+            "DeviceIp": "192.168.1.50",
+            "AllowedOps": ["Vibrate"],
+            "MaxIntensityVibrate": 70,
+            "MaxDurationMs": 1000,
+            "MaxBurst": 5
+          }
+        }
+      ]
+    },
+    "BodyMap": {
+      "OverlapPolicy": "Warn",
+      "Placements": [
+        {
+          "BackendId": "pishock-left-thigh",
+          "ZoneIds": ["shock"],
+          "Region": "LeftThigh",
+          "Description": "Left inner thigh, mid-position"
+        },
+        {
+          "BackendId": "pishock-right-calf",
+          "ZoneIds": ["shock"],
+          "Region": "RightCalf",
+          "Description": "Right calf, outer side"
+        }
+      ]
+    }
+  }
+}

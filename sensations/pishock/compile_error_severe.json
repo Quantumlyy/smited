@@ -1,0 +1,21 @@
+{
+  "name": "compile_error_severe",
+  "backend_kind": "pishock",
+  "display_name": "Compile Error (Severe)",
+  "description": "Stronger sustained vibrate — many errors at once or a critical failure.",
+  "tags": ["dev", "feedback", "error", "severe"],
+  "default_zone_ids": ["shock"],
+  "default_intensity": 100,
+  "estimated_duration": "1.0s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "op":        { "enum_value": "vibrate" },
+          "duration":  { "duration":   "1.0s" },
+          "intensity": { "number":     60 }
+        }
+      }
+    ]
+  }
+}
