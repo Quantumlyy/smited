@@ -21,16 +21,16 @@ internal static class Program
               --apikey <api-key> \
               --sharecode <share-code> \
               [--op vibrate|beep|shock] \
-              [--duration <ms>] \
+              [--duration <ms 1..15000>] \
               [--intensity <0..100>]
 
           # LAN mode
           dotnet run --project scripts/pishock-smoke -- \
               --mode lan \
               --ip <device-ip> \
-              [--port <port>] \
+              [--port <1..65535>] \
               [--op vibrate|beep|shock] \
-              [--duration <ms>] \
+              [--duration <ms 1..15000>] \
               [--intensity <0..100>]
 
         Defaults: --op vibrate --duration 200 --intensity 20
@@ -44,18 +44,15 @@ internal static class Program
             return 0;
         }
 
-        var parsed = ParseArgs(args);
-        if (parsed is null)
+        var parseResult = ArgParser.Parse(args);
+        if (parseResult is ArgParseResult.Failure failure)
         {
+            Console.Error.WriteLine(failure.Message);
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(Usage);
             return 2;
         }
-        var a = parsed.Value;
-
-        if (!System.Enum.TryParse<PishockOp>(a.OpName, ignoreCase: true, out var op))
-        {
-            Console.Error.WriteLine($"Unknown op '{a.OpName}'. Valid: vibrate, beep, shock.");
-            return 2;
-        }
+        var a = ((ArgParseResult.Success)parseResult).Args;
 
         var options = new PishockBackendOptions
         {
@@ -67,7 +64,8 @@ internal static class Program
             DevicePort = a.DevicePort,
             // Pre-flight is a one-shot fire; bypass the daemon's per-op
             // safety caps. The duration/intensity passed on the command
-            // line are user-provided and trusted in this context.
+            // line are validated by ArgParser before reaching here, so
+            // we can trust them at this point.
             AllowedOps = new() { PishockOp.Vibrate, PishockOp.Beep, PishockOp.Shock },
             MaxIntensityShock = 100,
             MaxIntensityVibrate = 100,
@@ -103,8 +101,8 @@ internal static class Program
         }
 
         Console.WriteLine(
-            $"Sending {op} for {a.DurationMs}ms at {a.Intensity}% via {a.Mode}...");
-        var result = await client.SendOpAsync(op, a.DurationMs, a.Intensity, CancellationToken.None);
+            $"Sending {a.Op} for {a.DurationMs}ms at {a.Intensity}% via {a.Mode}...");
+        var result = await client.SendOpAsync(a.Op, a.DurationMs, a.Intensity, CancellationToken.None);
 
         Console.WriteLine();
         Console.WriteLine($"Accepted:    {result.Accepted}");
@@ -115,38 +113,95 @@ internal static class Program
         }
         return result.Accepted ? 0 : 1;
     }
+}
 
-    private readonly record struct ParsedArgs(
-        PishockTransportMode Mode,
-        string? Username,
-        string? ApiKey,
-        string? ShareCode,
-        string? DeviceIp,
-        int? DevicePort,
-        string OpName,
-        int DurationMs,
-        int Intensity);
+/// <summary>
+/// Validated command-line arguments for the smoke tool. ArgParser.Parse
+/// guarantees every field has a sensible value before this struct is
+/// constructed.
+/// </summary>
+internal readonly record struct ParsedArgs(
+    PishockTransportMode Mode,
+    string? Username,
+    string? ApiKey,
+    string? ShareCode,
+    string? DeviceIp,
+    int? DevicePort,
+    PishockOp Op,
+    int DurationMs,
+    int Intensity);
 
-    private static ParsedArgs? ParseArgs(string[] args)
+/// <summary>
+/// Discriminated result of <see cref="ArgParser.Parse"/>. Success
+/// carries validated args; Failure carries the user-facing error
+/// message to print.
+/// </summary>
+internal abstract record ArgParseResult
+{
+    public sealed record Success(ParsedArgs Args) : ArgParseResult;
+    public sealed record Failure(string Message) : ArgParseResult;
+}
+
+/// <summary>
+/// Command-line argument parsing for the smoke tool. Strict on
+/// purpose — bad input gets a clear error and exit 2, not a silent
+/// fallback to a default that fires something the user didn't ask
+/// for on real hardware.
+/// </summary>
+internal static class ArgParser
+{
+    public static ArgParseResult Parse(string[] args)
     {
-        var modeStr = ReadOpt(args, "--mode") ?? "";
+        var modeStr = ReadOpt(args, "--mode");
+        if (string.IsNullOrEmpty(modeStr))
+        {
+            return new ArgParseResult.Failure("--mode is required (cloud or lan).");
+        }
         if (!System.Enum.TryParse<PishockTransportMode>(modeStr, ignoreCase: true, out var mode))
         {
-            Console.Error.WriteLine($"--mode must be 'cloud' or 'lan' (got '{modeStr}').");
-            Console.Error.WriteLine(Usage);
-            return null;
+            return new ArgParseResult.Failure(
+                $"--mode must be 'cloud' or 'lan', got '{modeStr}'.");
         }
 
-        return new ParsedArgs(
+        var opStr = ReadOpt(args, "--op") ?? "vibrate";
+        if (!System.Enum.TryParse<PishockOp>(opStr, ignoreCase: true, out var op))
+        {
+            return new ArgParseResult.Failure(
+                $"--op must be 'vibrate', 'beep', or 'shock', got '{opStr}'.");
+        }
+
+        // Duration in ms. Reject obvious nonsense — non-int, <=0, or
+        // beyond the cloud API's 15s ceiling. The daemon's per-op
+        // duration cap is higher (60s for the smoke session) so the
+        // tighter bound here is about catching typos like "abc" or
+        // "1500ms" that the daemon would silently coerce to a
+        // default.
+        var durationResult = ParseInt(args, "--duration", min: 1, max: 15_000, defaultValue: 200);
+        if (durationResult is ParseIntResult.Failure df) return new ArgParseResult.Failure(df.Message);
+        var duration = ((ParseIntResult.Success)durationResult).Value;
+
+        var intensityResult = ParseInt(args, "--intensity", min: 0, max: 100, defaultValue: 20);
+        if (intensityResult is ParseIntResult.Failure intf) return new ArgParseResult.Failure(intf.Message);
+        var intensity = ((ParseIntResult.Success)intensityResult).Value;
+
+        int? port = null;
+        if (ReadOpt(args, "--port") is not null)
+        {
+            var portResult = ParseInt(args, "--port", min: 1, max: 65_535, defaultValue: 80);
+            if (portResult is ParseIntResult.Failure pf) return new ArgParseResult.Failure(pf.Message);
+            port = ((ParseIntResult.Success)portResult).Value;
+        }
+
+        return new ArgParseResult.Success(new ParsedArgs(
             Mode: mode,
             Username: ReadOpt(args, "--username"),
             ApiKey: ReadOpt(args, "--apikey"),
             ShareCode: ReadOpt(args, "--sharecode"),
             DeviceIp: ReadOpt(args, "--ip"),
-            DevicePort: ReadIntOpt(args, "--port"),
-            OpName: ReadOpt(args, "--op") ?? "vibrate",
-            DurationMs: ReadIntOpt(args, "--duration") ?? 200,
-            Intensity: ReadIntOpt(args, "--intensity") ?? 20);
+            DevicePort: port,
+            Op: op,
+            DurationMs: duration,
+            Intensity: intensity));
     }
 
     private static string? ReadOpt(string[] args, string name)
@@ -155,12 +210,45 @@ internal static class Program
         {
             if (args[i] == name) return args[i + 1];
         }
+        // Also catch "--flag" as the last arg with no value. Without
+        // this, the loop above silently treats trailing flags as
+        // absent — a typo like `--duration` at the end of the line
+        // would fall back to the default rather than erroring.
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == name) return ""; // present but missing value
+        }
         return null;
     }
 
-    private static int? ReadIntOpt(string[] args, string name)
+    private static ParseIntResult ParseInt(
+        string[] args, string name, int min, int max, int defaultValue)
     {
         var raw = ReadOpt(args, name);
-        return raw is not null && int.TryParse(raw, out var v) ? v : null;
+        if (raw is null)
+        {
+            return new ParseIntResult.Success(defaultValue);
+        }
+        if (raw.Length == 0)
+        {
+            return new ParseIntResult.Failure($"{name} requires a value.");
+        }
+        if (!int.TryParse(raw, out var v))
+        {
+            return new ParseIntResult.Failure(
+                $"{name} must be an integer, got '{raw}'.");
+        }
+        if (v < min || v > max)
+        {
+            return new ParseIntResult.Failure(
+                $"{name} must be in [{min}, {max}], got {v}.");
+        }
+        return new ParseIntResult.Success(v);
+    }
+
+    private abstract record ParseIntResult
+    {
+        public sealed record Success(int Value) : ParseIntResult;
+        public sealed record Failure(string Message) : ParseIntResult;
     }
 }
