@@ -140,28 +140,57 @@ Iterate the rest:
 | `pr_merged`            | Soft vibrate then a confirmation beep          |
 | `notification`         | 100ms beep                                     |
 
-## 5. Verify rate limiting
+## 5. Verify single-channel concurrency
 
-Spam-fire `compile_error_mild` five times in under a second:
+PiShock is single-channel — the device fires one op at a time, and
+the daemon refuses overlapping triggers with
+`TRIGGER_ERROR_CODE_RATE_LIMITED`. Fire `compile_error_mild` twice
+back-to-back without waiting:
 
 ```sh
-for i in 1 2 3 4 5; do
-  grpcurl -plaintext -d '{
-      "backend_id":"pishock-left-thigh",
-      "sensation_name":"compile_error_mild"
-  }' localhost:7777 smited.v1.SmitedService/Trigger
-done
+grpcurl -plaintext -d '{
+    "backend_id":"pishock-left-thigh",
+    "sensation_name":"compile_error_mild"
+}' localhost:7777 smited.v1.SmitedService/Trigger &
+
+grpcurl -plaintext -d '{
+    "backend_id":"pishock-left-thigh",
+    "sensation_name":"compile_error_mild"
+}' localhost:7777 smited.v1.SmitedService/Trigger
 ```
 
-With default `MaxBurst: 3` and `MaxOpsPerSecond: 1`:
+Expected: the first call returns `accepted: true`, the second
+returns `accepted: false` with
+`error.code: TRIGGER_ERROR_CODE_RATE_LIMITED`. This is the
+`MaxConcurrent: 1` + `Policy: RejectNew` enforcement — the device
+can't fire two ops at once, so the daemon refuses the overlap
+rather than silently sending it.
 
-- First 3 fires: `accepted: true`.
-- Fires 4 and 5: `accepted: false` with
-  `error.code: TRIGGER_ERROR_CODE_RATE_LIMITED` and a message like
-  `trigger needs 1 bucket tokens but only 0 were available; bump MaxBurst`.
+Wait for the slot to free (RequestTimeoutMs + the sensation's
+duration) and the next trigger goes through.
 
-Wait one second and try again — refilled tokens let the next fire
-through.
+## 5b. Verify the token bucket independently
+
+The token bucket sits underneath the concurrency gate and protects
+multi-pulse sensations from exceeding the configured burst budget.
+With default `MaxBurst: 3`, a 5-pulse sensation needs 5 tokens at
+trigger time, so it's rejected with `RATE_LIMITED` at the
+backend's pre-allocation step before any wire traffic happens.
+
+Bump `MaxBurst` for one descriptor to `2` in your config, restart,
+and trigger a 3-pulse sensation:
+
+```sh
+grpcurl -plaintext -d '{
+    "backend_id":"pishock-left-thigh",
+    "sensation_name":"deploy_success"
+}' localhost:7777 smited.v1.SmitedService/Trigger
+# Expected: accepted=false, error.code=RATE_LIMITED, message like
+# "trigger needs 3 bucket tokens; bump MaxBurst or slow down the
+# trigger rate".
+```
+
+Restore `MaxBurst: 3` (or higher for pattern-heavy sensations).
 
 ## 6. Verify AllowedOps gating
 
@@ -172,13 +201,15 @@ only, so a beep should be rejected:
 ```sh
 grpcurl -plaintext -d '{
     "backend_id":"pishock-right-calf",
-    "inline_microsensations": [{
-      "parameters": {
-        "op": { "enum_value": "Beep" },
-        "duration": { "duration": "0.1s" },
-        "intensity": { "number": 30 }
-      }
-    }]
+    "inline": {
+      "microsensations": [{
+        "parameters": {
+          "op": { "enum_value": "beep" },
+          "duration": { "duration": "0.1s" },
+          "intensity": { "number": 30 }
+        }
+      }]
+    }
 }' localhost:7777 smited.v1.SmitedService/Trigger
 # Expected: accepted=false, error.code=INVALID_PARAMETER,
 # error.field=microsensations[0].parameters.op
@@ -200,13 +231,15 @@ Restart, then author and fire a low-intensity short shock:
 ```sh
 grpcurl -plaintext -d '{
     "backend_id":"pishock-left-thigh",
-    "inline_microsensations": [{
-      "parameters": {
-        "op": { "enum_value": "Shock" },
-        "duration": { "duration": "0.1s" },
-        "intensity": { "number": 5 }
-      }
-    }]
+    "inline": {
+      "microsensations": [{
+        "parameters": {
+          "op": { "enum_value": "shock" },
+          "duration": { "duration": "0.1s" },
+          "intensity": { "number": 5 }
+        }
+      }]
+    }
 }' localhost:7777 smited.v1.SmitedService/Trigger
 ```
 
