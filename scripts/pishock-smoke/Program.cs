@@ -150,8 +150,25 @@ internal abstract record ArgParseResult
 /// </summary>
 internal static class ArgParser
 {
+    private static readonly HashSet<string> KnownFlags = new(StringComparer.Ordinal)
+    {
+        "--mode", "--username", "--apikey", "--sharecode",
+        "--ip", "--port", "--op", "--duration", "--intensity",
+    };
+
     public static ArgParseResult Parse(string[] args)
     {
+        // First pass: every arg must be a recognized flag followed by
+        // a value. Without this, a typo like --intensiy 0 falls
+        // through to the default --intensity 20 and fires real
+        // hardware — exactly the silent failure the smoke tool is
+        // supposed to catch before it reaches the device.
+        var unknownCheck = ValidateRecognizedFlags(args);
+        if (unknownCheck is not null)
+        {
+            return unknownCheck;
+        }
+
         var modeStr = ReadOpt(args, "--mode");
         if (string.IsNullOrEmpty(modeStr))
         {
@@ -202,6 +219,36 @@ internal static class ArgParser
             Op: op,
             DurationMs: duration,
             Intensity: intensity));
+    }
+
+    private static ArgParseResult.Failure? ValidateRecognizedFlags(string[] args)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (!arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                return new ArgParseResult.Failure(
+                    $"Unexpected argument '{arg}'. Every flag must be in --name form; "
+                    + "stray positional arguments aren't supported.");
+            }
+            if (!KnownFlags.Contains(arg))
+            {
+                return new ArgParseResult.Failure(
+                    $"Unknown flag '{arg}'. Run with --help for the list of supported flags.");
+            }
+            if (!seen.Add(arg))
+            {
+                return new ArgParseResult.Failure(
+                    $"Flag '{arg}' specified more than once. Each flag must appear at most once.");
+            }
+            // Skip the value that follows. Out-of-bounds is fine — the
+            // value-required check inside ParseInt / required-string
+            // checks below catch trailing flags without values.
+            i++;
+        }
+        return null;
     }
 
     private static string? ReadOpt(string[] args, string name)
