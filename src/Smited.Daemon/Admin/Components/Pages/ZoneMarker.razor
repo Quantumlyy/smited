@@ -1,0 +1,76 @@
+@*  Single zone marker on the body map silhouette. Dumb component:
+    coordinates and rendered state come from the parent, so the front /
+    back X-flip math lives in BodySilhouette and not here.
+
+    Active zones render at a larger radius with a concentric SVG
+    <animate>-driven pulse ring; recently-fired (but not currently
+    active) zones keep their base radius and just fade via fill-opacity.
+
+    Forbidden zones get a dashed red outline regardless of state — they
+    won't fire from this UI anyway, so the visual flag is preventative.  *@
+
+<g class="bodymap-zone"
+   @onmouseover="OnMouseOverInternal"
+   @onmouseout="OnMouseOutInternal"
+   @onclick="OnClickInternal">
+    <circle cx="@Cx.ToString(_inv)" cy="@Cy.ToString(_inv)" r="@Radius"
+            fill="@Color"
+            fill-opacity="@HeatOpacity.ToString("F2", _inv)"
+            stroke="@Stroke"
+            stroke-width="2"
+            stroke-dasharray="@StrokeDash" />
+    @if (Zone.IsActive)
+    {
+        <circle cx="@Cx.ToString(_inv)" cy="@Cy.ToString(_inv)" r="@((Radius + 6).ToString(_inv))"
+                fill="none"
+                stroke="@Color"
+                stroke-width="2"
+                opacity="0.5">
+            <animate attributeName="r"
+                     values="@($"{Radius};{Radius + 12};{Radius}")"
+                     dur="0.6s"
+                     repeatCount="indefinite" />
+            <animate attributeName="opacity"
+                     values="0.6;0;0.6"
+                     dur="0.6s"
+                     repeatCount="indefinite" />
+        </circle>
+    }
+</g>
+
+@code {
+    private static readonly System.Globalization.CultureInfo _inv =
+        System.Globalization.CultureInfo.InvariantCulture;
+
+    [Parameter, EditorRequired] public RenderedZone Zone { get; set; } = default!;
+    [Parameter, EditorRequired] public double Cx { get; set; }
+    [Parameter, EditorRequired] public double Cy { get; set; }
+    [Parameter] public EventCallback<RenderedZone?> OnHover { get; set; }
+    [Parameter] public EventCallback<RenderedZone> OnClick { get; set; }
+
+    private int Radius => Zone.IsActive ? 14 : 10;
+
+    private double HeatOpacity => Zone.IsActive
+        ? 1.0
+        : Math.Max(0.18, Zone.HeatLevel);
+
+    private string Color => Zone.BackendKind switch
+    {
+        "owo_skin" => "#3b82f6",          // blue
+        "bhaptics_vest" => "#10b981",     // green
+        "bhaptics_sleeve_l" => "#f59e0b", // amber
+        "bhaptics_sleeve_r" => "#f59e0b",
+        "bhaptics_feet_l" => "#8b5cf6",   // purple
+        "bhaptics_feet_r" => "#8b5cf6",
+        "pishock" => "#ef4444",           // red
+        _ => "#ec4899",                   // pink — anything unknown (incl. mocks)
+    };
+
+    private string Stroke => Zone.IsForbidden ? "#ff3030" : "transparent";
+
+    private string StrokeDash => Zone.IsForbidden ? "3 2" : "none";
+
+    private Task OnMouseOverInternal() => OnHover.InvokeAsync(Zone);
+    private Task OnMouseOutInternal() => OnHover.InvokeAsync(null);
+    private Task OnClickInternal() => OnClick.InvokeAsync(Zone);
+}

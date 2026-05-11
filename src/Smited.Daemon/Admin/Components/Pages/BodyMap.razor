@@ -1,0 +1,58 @@
+@page "/bodymap"
+@inject BackendRegistry Registry
+
+<PageTitle>Body Map — smited</PageTitle>
+
+@*  Admin body map. Renders every registered backend's zones on a front
+    + back silhouette, pulsing them live as sensations fire. Click any
+    non-forbidden zone to fire a brief backend-specific diagnostic;
+    hover for full zone metadata.
+
+    Lives alongside the main dashboard (Index.razor at "/"). Shares the
+    Header component so the nav, status pill, and breaker banner work
+    consistently across both pages.  *@
+
+<Header />
+
+<section class="card bodymap-page">
+    <div class="bodymap-toolbar">
+        <label>
+            Backend filter:
+            <select @bind="_filter" class="bodymap-filter">
+                <option value="">All backends</option>
+                @foreach (var backend in Registry.All)
+                {
+                    <option value="@backend.Id">@backend.Id (@backend.Kind)</option>
+                }
+            </select>
+        </label>
+
+        <div class="bodymap-legend">
+            <span class="bodymap-legend-item">
+                <span class="bodymap-legend-dot bodymap-legend-active"></span> Active
+            </span>
+            <span class="bodymap-legend-item">
+                <span class="bodymap-legend-dot bodymap-legend-recent"></span> Recently fired
+            </span>
+            <span class="bodymap-legend-item">
+                <span class="bodymap-legend-dot bodymap-legend-forbidden"></span> Forbidden
+            </span>
+        </div>
+    </div>
+
+    @if (!Registry.All.Any())
+    {
+        <div class="bodymap-empty">
+            No backends registered. Enable a backend in
+            <code>appsettings.json</code> and restart the daemon.
+        </div>
+    }
+    else
+    {
+        <BodySilhouette BackendFilter="@_filter" />
+    }
+</section>
+
+@code {
+    private string _filter = "";
+}

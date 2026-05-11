@@ -109,3 +109,150 @@ button { font: inherit; cursor: pointer; }
 :root {
     --muted-bg: #1f1f1f;
 }
+
+/* ---------- Admin top-nav (Dashboard / Body map links in Header) ---------- */
+.admin-nav { display: inline-flex; gap: 0.75rem; }
+.admin-nav-link {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.85rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.admin-nav-link:hover { color: var(--fg); background: rgba(255,255,255,0.04); }
+
+/* ---------- Body map page ---------- */
+.bodymap-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.bodymap-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.bodymap-filter {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    font: inherit;
+    margin-left: 0.5rem;
+}
+.bodymap-legend {
+    margin-left: auto;
+    display: flex;
+    gap: 0.75rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    align-items: center;
+}
+.bodymap-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+.bodymap-legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+.bodymap-legend-active { box-shadow: 0 0 6px var(--accent); }
+.bodymap-legend-recent { opacity: 0.3; }
+.bodymap-legend-forbidden {
+    background: transparent;
+    border: 2px dashed #ff3030;
+    box-sizing: border-box;
+}
+
+.bodymap-canvas {
+    position: relative;
+    width: 100%;
+}
+.bodymap-svg {
+    display: block;
+    width: 100%;
+    max-width: 720px;
+    height: auto;
+    margin: 0 auto;
+}
+
+/* SVG-text label for the front/back panes — applied to <text> inside
+   the bodymap-svg. */
+.bodymap-pane-label {
+    fill: var(--muted);
+    font-size: 14px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    text-anchor: middle;
+}
+
+.bodymap-zone { cursor: pointer; transition: filter 0.15s; }
+.bodymap-zone:hover { filter: brightness(1.35); }
+
+.bodymap-tooltip {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: var(--card);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 0.6rem 0.9rem;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    min-width: 14rem;
+}
+.bodymap-tooltip-zone { font-weight: 600; font-size: 0.95rem; }
+.bodymap-tooltip-id { color: var(--muted); margin-bottom: 0.35rem; }
+.bodymap-tooltip-backend { color: var(--fg); }
+.bodymap-tooltip-pos { color: var(--muted); font-size: 0.75rem; }
+.bodymap-tooltip-forbidden {
+    color: #fca5a5;
+    font-weight: 600;
+    margin-top: 0.35rem;
+}
+.bodymap-tooltip-hint {
+    color: #6ee7b7;
+    font-size: 0.7rem;
+    margin-top: 0.4rem;
+}
+
+.bodymap-empty {
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    text-align: center;
+}
+
+/* In-page breaker banner. Styled to match the global .banner-tripped
+   from Header but lighter — the global banner already shouts in the
+   page header. */
+.bodymap-banner-tripped {
+    background: rgba(210,74,74,0.08);
+    border: 1px solid var(--err);
+    color: var(--err);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+/* Floating toast surfaces failed click-to-fire (rejected by validator,
+   thrown exception). Cleared after ~4 seconds. */
+.bodymap-toast-err {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.5rem;
+    background: rgba(210,74,74,0.15);
+    color: var(--err);
+    border: 1px solid var(--err);
+    padding: 0.4rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    max-width: 22rem;
+    pointer-events: none;
+}
