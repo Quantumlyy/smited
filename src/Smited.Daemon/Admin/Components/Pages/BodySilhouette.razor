@@ -89,31 +89,47 @@
         _breakerState = new BreakerState(Breaker.IsTripped, Breaker.TrippedAt, Breaker.TripReason);
         Breaker.StateChanged += OnBreakerStateChanged;
         // Periodic re-render so the heatmap fade animates smoothly even
-        // when no events arrive between frames. The tick calls
-        // RebuildZones so HeatLevel is recomputed against the *current*
-        // clock — re-rendering without rebuilding would keep painting
-        // the same baked-in HeatLevel from the last state-change and
-        // the fade would never advance.
+        // when no events arrive between frames. The tick must run on
+        // the renderer dispatcher because RebuildZones writes
+        // _frontZones / _backZones — without InvokeAsync those writes
+        // race the Blazor render loop reading those same fields.
         _fadeTicker = new System.Threading.Timer(_ =>
         {
-            RebuildZones();
-            _ = InvokeAsync(StateHasChanged);
+            _ = InvokeAsync(() =>
+            {
+                RebuildZones();
+                StateHasChanged();
+            });
         }, null, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(200));
         RebuildZones();
     }
 
     protected override void OnParametersSet() => RebuildZones();
 
+    // Fires from BodyMapPageState's consumer thread (Task.Run inside
+    // ConsumeAsync). Marshal both the rebuild and the render onto the
+    // Blazor dispatcher so the field writes and the render that reads
+    // them serialize through the same circuit-bound queue.
     private void OnStateChanged()
     {
-        RebuildZones();
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            RebuildZones();
+            StateHasChanged();
+        });
     }
 
+    // IBreakerService.StateChanged fires from arbitrary threads (the
+    // panic endpoint runs on Kestrel's request thread, for instance).
+    // Marshal both the field write and the render through the
+    // dispatcher for the same reason as OnStateChanged.
     private void OnBreakerStateChanged(BreakerState state)
     {
-        _breakerState = state;
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            _breakerState = state;
+            StateHasChanged();
+        });
     }
 
     private void RebuildZones()
