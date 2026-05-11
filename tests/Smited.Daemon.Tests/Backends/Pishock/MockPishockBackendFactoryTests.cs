@@ -265,6 +265,72 @@ public class MockPishockBackendFactoryTests
     }
 
     [Fact]
+    public void TryCreate_with_numeric_AllowedOps_entry_throws_does_not_bind_to_named_op()
+    {
+        // IConfiguration.Bind happily turns the JSON numeric 0 into
+        // PishockOp.Shock (the first enum member). Without a raw-value
+        // guard, "AllowedOps": [0] in config silently opts a descriptor
+        // into Shock — the exact bypass the named-opt-in story is
+        // supposed to prevent. Operators relying on docs that say
+        // Shock requires the literal "Shock" string would have their
+        // safety story broken by a numeric typo.
+        var json = """
+            {
+              "Options": {
+                "AllowedOps": [0]
+              }
+            }
+            """;
+        var config = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            .Build();
+        var section = config.GetSection("Options");
+        var services = new ServiceCollection()
+            .AddSingleton<TimeProvider>(new FakeTimeProvider(
+                new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero)))
+            .AddLogging()
+            .BuildServiceProvider();
+        var factory = new MockPishockBackendFactory();
+        var descriptor = new BackendDescriptor { Kind = "mock_pishock", Id = "numeric-op" };
+
+        var act = () => factory.TryCreate(descriptor, section, services, NullLogger.Instance);
+
+        act.Should().Throw<BackendConfigurationException>()
+            .WithMessage("*AllowedOps*");
+    }
+
+    [Fact]
+    public void TryCreate_with_AllowedOps_named_strings_still_works()
+    {
+        // Sanity: after rejecting numerics, the documented happy path
+        // (named strings, case-insensitive) keeps working.
+        var json = """
+            {
+              "Options": {
+                "AllowedOps": ["vibrate", "BEEP"]
+              }
+            }
+            """;
+        var config = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            .Build();
+        var section = config.GetSection("Options");
+        var services = new ServiceCollection()
+            .AddSingleton<TimeProvider>(new FakeTimeProvider(
+                new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero)))
+            .AddLogging()
+            .BuildServiceProvider();
+        var factory = new MockPishockBackendFactory();
+        var descriptor = new BackendDescriptor { Kind = "mock_pishock", Id = "named-ops" };
+
+        var backend = factory.TryCreate(descriptor, section, services, NullLogger.Instance);
+
+        backend!.Capabilities.Should().Contain("vibrate");
+        backend.Capabilities.Should().Contain("beep");
+        backend.Capabilities.Should().NotContain("shock");
+    }
+
+    [Fact]
     public void TryCreate_with_explicit_empty_AllowedOps_array_throws_does_not_silently_default()
     {
         // The .NET configuration binder produces null AllowedOps for

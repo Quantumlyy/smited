@@ -36,6 +36,14 @@ public sealed class MockPishockBackendFactory : IBackendFactory
         ArgumentNullException.ThrowIfNull(optionsSection);
         ArgumentNullException.ThrowIfNull(services);
 
+        // Validate the RAW AllowedOps entries before binding. The
+        // configuration binder turns numeric JSON entries into enum
+        // members by underlying value, so "AllowedOps": [0] would
+        // silently opt the descriptor into PishockOp.Shock — bypassing
+        // the named opt-in story documented for the Shock op. Reject
+        // anything that isn't a recognized name first.
+        ValidateAllowedOpsRawEntries(descriptor, optionsSection);
+
         var options = optionsSection.Get<PishockBackendOptions>() ?? new PishockBackendOptions();
         NormalizeExplicitEmptyAllowedOps(options, optionsSection);
 
@@ -69,6 +77,50 @@ public sealed class MockPishockBackendFactory : IBackendFactory
     /// vulnerability since both Get&lt;PishockBackendOptions&gt;() on
     /// the same JSON.
     /// </remarks>
+    /// <summary>
+    /// Rejects raw <c>AllowedOps</c> entries that aren't recognized
+    /// PiShock op names. <c>System.Enum.TryParse</c> and the
+    /// configuration binder both accept numeric strings and map them to
+    /// the corresponding enum member, so a JSON entry like <c>[0]</c>
+    /// binds to <c>PishockOp.Shock</c> and silently bypasses the
+    /// "Shock must be explicitly opted in by name" story documented
+    /// across the user-facing surfaces. Walk the raw section's
+    /// children and require each value to match one of the
+    /// <c>vibrate</c> / <c>beep</c> / <c>shock</c> names.
+    /// </summary>
+    /// <remarks>
+    /// Shared between mock and real PiShock factories. Same defense
+    /// pattern as the smoke tool's <c>TryParseEnumName</c>, applied at
+    /// the config-binding layer instead of CLI parsing.
+    /// </remarks>
+    internal static void ValidateAllowedOpsRawEntries(
+        BackendDescriptor descriptor, IConfigurationSection optionsSection)
+    {
+        var section = optionsSection.GetSection("AllowedOps");
+        var validNames = System.Enum.GetNames<PishockOp>();
+        foreach (var child in section.GetChildren())
+        {
+            var raw = child.Value;
+            if (string.IsNullOrEmpty(raw))
+            {
+                throw new BackendConfigurationException(descriptor.Id, descriptor.Kind,
+                    $"AllowedOps[{child.Key}] is empty; entries must be one of "
+                    + $"{string.Join(", ", validNames)} (case-insensitive name strings, "
+                    + "not numeric values).");
+            }
+            var match = validNames.FirstOrDefault(n =>
+                string.Equals(n, raw, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+            {
+                throw new BackendConfigurationException(descriptor.Id, descriptor.Kind,
+                    $"AllowedOps[{child.Key}]='{raw}' is not a recognized PiShock op. "
+                    + $"Valid values: {string.Join(", ", validNames)} (named strings only — "
+                    + "numeric values like 0 or 1 are rejected so Shock can't be opted "
+                    + "into accidentally via PishockOp's underlying value).");
+            }
+        }
+    }
+
     internal static void NormalizeExplicitEmptyAllowedOps(
         PishockBackendOptions options, IConfigurationSection optionsSection)
     {

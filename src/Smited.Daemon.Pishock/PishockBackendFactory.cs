@@ -40,6 +40,10 @@ public sealed class PishockBackendFactory : IBackendFactory
         ArgumentNullException.ThrowIfNull(optionsSection);
         ArgumentNullException.ThrowIfNull(services);
 
+        // Same name-only AllowedOps validation as the mock factory —
+        // reject numeric raw entries before they bind to a named op.
+        MockPishockBackendFactory.ValidateAllowedOpsRawEntries(descriptor, optionsSection);
+
         var options = optionsSection.Get<PishockBackendOptions>() ?? new PishockBackendOptions();
         MockPishockBackendFactory.NormalizeExplicitEmptyAllowedOps(options, optionsSection);
 
