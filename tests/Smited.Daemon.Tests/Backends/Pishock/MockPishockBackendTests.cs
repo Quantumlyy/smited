@@ -92,6 +92,28 @@ public class MockPishockBackendTests
     }
 
     [Fact]
+    public void Parameter_schema_advertises_every_op_regardless_of_AllowedOps()
+    {
+        // Kind-scoped bundled sensations (sensations/pishock/*.json)
+        // validate against EVERY registered backend of the pishock
+        // kind. Narrowing the schema's enum_values to a descriptor's
+        // AllowedOps would refuse a bundled Beep sensation on a
+        // vibrate-only descriptor at startup, even though the user
+        // simply doesn't want to fire Beep on that shocker. The
+        // schema stays broad; the per-instance AllowedOps gate runs
+        // at trigger time in PishockTriggerValidator with a
+        // structured INVALID_PARAMETER.
+        var options = new PishockBackendOptions
+        {
+            AllowedOps = new() { PishockOp.Vibrate },
+        };
+        var backend = NewBackend(out _, options);
+
+        var byName = backend.Parameters.Parameters.ToDictionary(p => p.Name);
+        byName["op"].EnumValues.Should().BeEquivalentTo(new[] { "vibrate", "beep", "shock" });
+    }
+
+    [Fact]
     public void Parameter_schema_declares_op_duration_intensity_and_optional_delay_before()
     {
         var backend = NewBackend(out _);

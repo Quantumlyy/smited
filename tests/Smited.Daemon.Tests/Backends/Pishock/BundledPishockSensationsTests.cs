@@ -131,6 +131,38 @@ public class BundledPishockSensationsTests
         }
     }
 
+    [Theory]
+    [InlineData("pr_merged.json")]
+    [InlineData("notification.json")]
+    public void Vibrate_only_descriptor_does_not_refuse_bundled_beep_sensations_at_load(string filename)
+    {
+        // Reproduces the original startup-abort report: a valid
+        // AllowedOps:["Vibrate"] descriptor loaded against the bundled
+        // kind-scoped library would refuse pr_merged and notification
+        // (both use the Beep op). The schema must advertise every op
+        // so SensationValidator passes at load time; AllowedOps gating
+        // is a trigger-time concern.
+        var dto = LoadFile(filename);
+        var vibrateOnly = new MockPishockBackend(
+            "vibrate-only",
+            new PishockBackendOptions
+            {
+                AllowedOps = new() { PishockOp.Vibrate },
+            },
+            new FakeTimeProvider(),
+            NullLogger<MockPishockBackend>.Instance);
+
+        var micros = dto.Definition.Microsensations
+            .Select(m => new MicrosensationParameters(m.Parameters))
+            .ToArray();
+        var failure = SensationValidator.Validate(micros, dto.DefaultZoneIds, vibrateOnly);
+
+        failure.Should().BeNull(
+            "a vibrate-only descriptor must not refuse a bundled Beep sensation at "
+            + "load — the trigger-time AllowedOps check is what rejects an attempted "
+            + "Beep fire on that descriptor, with a structured INVALID_PARAMETER");
+    }
+
     [Fact]
     public void Bundled_set_includes_every_planned_sensation()
     {

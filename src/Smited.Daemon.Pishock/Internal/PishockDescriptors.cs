@@ -70,16 +70,21 @@ internal static class PishockDescriptors
             Required = true,
             Description = "PiShock operation type — vibrate, beep, or shock",
         };
-        // Lowercase: ParameterValue.enum_value is protovalidated as a
-        // lowercase ident on the wire, so the schema's enum_values
-        // have to match. Pascal "Vibrate" would be rejected by
-        // protovalidate before reaching the service for an inline
-        // microsensation; lowercase passes both. The backend's
-        // op-name parse uses Enum.TryParse with ignoreCase so reading
-        // back works regardless of caller casing.
-        foreach (var allowedOp in allowed)
+        // The schema advertises every PiShock op regardless of the
+        // descriptor's AllowedOps — narrowing here would refuse
+        // kind-scoped bundled sensations targeting Beep on a
+        // vibrate-only descriptor at startup, which is far worse than
+        // letting them load and rejecting the trigger if fired. The
+        // per-instance AllowedOps gate runs at trigger time in
+        // PishockTriggerValidator with a structured INVALID_PARAMETER.
+        //
+        // Lowercase to satisfy the wire's protovalidate ident pattern;
+        // see CallerAllowedOps note in Capabilities for the
+        // capability-list variant which DOES filter by AllowedOps
+        // (capabilities are a hint to clients, not a strict spec).
+        foreach (var op in new[] { PishockOp.Vibrate, PishockOp.Beep, PishockOp.Shock })
         {
-            opDef.EnumValues.Add(allowedOp.ToString().ToLowerInvariant());
+            opDef.EnumValues.Add(op.ToString().ToLowerInvariant());
         }
         schema.Parameters.Add(opDef);
 
