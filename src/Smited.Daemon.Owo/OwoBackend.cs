@@ -262,7 +262,32 @@ public sealed class OwoBackend : IHapticBackend
             authString = _options.AuthString;
         }
 
-        _sdk.Configure(_options.ProjectId, authString);
+        try
+        {
+            _sdk.Configure(_options.ProjectId, authString);
+        }
+        catch (Exception ex)
+        {
+            // GameAuth.Parse rejects malformed .owoauth payloads with
+            // FormatException / ArgumentException; OWO.Configure can
+            // also surface SDK-level issues here. All of these are
+            // user-fixable configuration mistakes (bad payload content,
+            // wrong ProjectId format), the same category as an
+            // unreadable AuthFilePath — and we want the same fatal
+            // treatment. Without this wrap, a malformed AuthString
+            // would propagate as the SDK's generic exception type,
+            // BackendBootstrapper would treat it as a transient
+            // ConnectAsync failure and log-and-skip, and the daemon
+            // would run silently without the configured OWO backend.
+            var hint = authString is not null
+                ? "Verify the .owoauth payload is well-formed (from OWO's Sensations Creator tool) "
+                  + "and the ProjectId matches the registered project."
+                : "Verify the ProjectId is accepted by the OWO SDK.";
+            throw new BackendConfigurationException(
+                Id, Kind,
+                $"OWO SDK rejected the supplied configuration: {ex.Message}. {hint}",
+                ex);
+        }
 
         var deadline = _options.ConnectTimeoutSeconds > 0
             ? TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds)
