@@ -1,3 +1,4 @@
+using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -261,6 +262,42 @@ public class MockPishockBackendFactoryTests
         backend!.Capabilities.Should().Contain("shock");
         backend.Capabilities.Should().NotContain("vibrate");
         backend.Capabilities.Should().NotContain("beep");
+    }
+
+    [Fact]
+    public void TryCreate_with_explicit_empty_AllowedOps_array_throws_does_not_silently_default()
+    {
+        // The .NET configuration binder produces null AllowedOps for
+        // BOTH "key absent" and "key explicitly set to []" — the empty
+        // JSON array creates a path with no children that Bind() can't
+        // distinguish from missing. Without an explicit check, an
+        // operator writing "AllowedOps": [] in their config (to mean
+        // "no ops allowed; please refuse to start") would silently
+        // get the [Vibrate, Beep] default and fire haptic hardware they
+        // told the daemon NOT to.
+        var json = """
+            {
+              "Options": {
+                "AllowedOps": []
+              }
+            }
+            """;
+        var config = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            .Build();
+        var section = config.GetSection("Options");
+        var services = new ServiceCollection()
+            .AddSingleton<TimeProvider>(new FakeTimeProvider(
+                new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero)))
+            .AddLogging()
+            .BuildServiceProvider();
+        var factory = new MockPishockBackendFactory();
+        var descriptor = new BackendDescriptor { Kind = "mock_pishock", Id = "explicit-empty" };
+
+        var act = () => factory.TryCreate(descriptor, section, services, NullLogger.Instance);
+
+        act.Should().Throw<BackendConfigurationException>()
+            .WithMessage("*AllowedOps*");
     }
 
     [Fact]

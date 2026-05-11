@@ -37,6 +37,7 @@ public sealed class MockPishockBackendFactory : IBackendFactory
         ArgumentNullException.ThrowIfNull(services);
 
         var options = optionsSection.Get<PishockBackendOptions>() ?? new PishockBackendOptions();
+        NormalizeExplicitEmptyAllowedOps(options, optionsSection);
 
         // The descriptor's top-level DisplayName is the documented
         // override surface; honor it over Options.DisplayName so the
@@ -50,6 +51,46 @@ public sealed class MockPishockBackendFactory : IBackendFactory
         ValidateOptions(descriptor, options);
 
         return ActivatorUtilities.CreateInstance<MockPishockBackend>(services, descriptor.Id, options);
+    }
+
+    /// <summary>
+    /// Distinguishes "AllowedOps key absent in config" from "AllowedOps
+    /// set to an empty array" — the configuration binder collapses both
+    /// to <c>null</c>, so without this normalization an operator writing
+    /// <c>"AllowedOps": []</c> in JSON to mean "refuse to start; this
+    /// shocker fires nothing" would silently get the
+    /// <c>[Vibrate, Beep]</c> default applied by
+    /// <c>EffectiveAllowedOps</c>. Sets <see cref="PishockBackendOptions.AllowedOps"/>
+    /// to an empty list when the config explicitly empty-arrayed it, so
+    /// <see cref="ValidateOptions"/>'s <c>{ Count: 0 }</c> guard fires.
+    /// </summary>
+    /// <remarks>
+    /// Shared between the mock and real factories; both have the same
+    /// vulnerability since both Get&lt;PishockBackendOptions&gt;() on
+    /// the same JSON.
+    /// </remarks>
+    internal static void NormalizeExplicitEmptyAllowedOps(
+        PishockBackendOptions options, IConfigurationSection optionsSection)
+    {
+        if (options.AllowedOps is not null)
+        {
+            return;
+        }
+        // The JSON provider creates a section at the AllowedOps path
+        // even when the array is empty. Section.Exists() returns false
+        // for both "missing" and "[]" (no value, no children), so we
+        // check the parent's children explicitly for the key.
+        var keyPresent = optionsSection.GetChildren().Any(c =>
+            string.Equals(c.Key, "AllowedOps", StringComparison.OrdinalIgnoreCase));
+        if (!keyPresent)
+        {
+            return;
+        }
+        var section = optionsSection.GetSection("AllowedOps");
+        if (!section.GetChildren().Any() && section.Value is null)
+        {
+            options.AllowedOps = new List<PishockOp>();
+        }
     }
 
     /// <summary>

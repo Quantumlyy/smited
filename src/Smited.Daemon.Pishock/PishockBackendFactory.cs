@@ -41,6 +41,7 @@ public sealed class PishockBackendFactory : IBackendFactory
         ArgumentNullException.ThrowIfNull(services);
 
         var options = optionsSection.Get<PishockBackendOptions>() ?? new PishockBackendOptions();
+        MockPishockBackendFactory.NormalizeExplicitEmptyAllowedOps(options, optionsSection);
 
         // Same precedence as MockPishockBackendFactory: descriptor.DisplayName
         // is the documented override surface, takes precedence over
