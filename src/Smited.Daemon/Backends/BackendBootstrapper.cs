@@ -308,6 +308,17 @@ internal sealed class BackendBootstrapper : IHostedService
         {
             await backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (BackendConfigurationException)
+        {
+            // User-fixable misconfiguration (e.g. an unreadable
+            // AuthFilePath on the OWO backend). Same policy as the
+            // factory-throw catch above: surface as startup failure so
+            // the daemon doesn't silently run without the backend the
+            // user configured. Log line above already named the
+            // descriptor; let the exception propagate so the host
+            // aborts.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex,
