@@ -1,41 +1,39 @@
 # OWO Skin integration
 
 smited's `OwoBackend` (in `src/Smited.Daemon.Owo/`) wraps the official
-OWO C# SDK to drive a calibrated OWO Skin haptic vest. This document
-covers prerequisites, configuration, the smoke-test runbook, and the
-manufacturer's TENS safety notes.
+OWO C# SDK to drive a calibrated OWO Skin haptic vest. Two desktop
+applications can sit between the daemon and the device:
 
-## Prerequisites
+- **OWO Visualizer** — accepts dev-mode auth, supports manual and
+  auto-discovery connections. **The canonical development path** for
+  smited contributors.
+- **MyOWO consumer app** — production-grade. Requires a project ID and
+  a signed `.owoauth` file, both gated on email approval from
+  `devs@owogame.com`.
 
-- **Windows 10 or 11.** The OWO SDK and the MyOWO desktop app are
-  Windows-only. Mac/Linux daemons run with `MockOwoBackend` only —
-  there is no shim available for the real device on those platforms.
-- **An OWO Skin device, paired and fully calibrated** through the MyOWO
-  app. Calibration is mandatory: the SDK refuses to send sensations to
-  an uncalibrated user, and the daemon's `ConnectAsync` will hang
-  until calibration completes.
-- **MyOWO running in the background** for the entire lifetime of the
-  daemon. The SDK talks to MyOWO over local TCP; the app then holds the
-  Bluetooth pairing with the device. Closing MyOWO drops the
-  daemon→device transport.
+The Visualizer is what every smited contributor uses unless they
+specifically need MyOWO consumer-app behavior. Treat it as a daemon
+prerequisite for OWO development.
 
-## First-time setup
+## Quick start (OWO Visualizer)
 
-1. Install MyOWO from `https://owogame.com/downloads`.
-2. Sign in (a free account is sufficient).
-3. Pair the device via MyOWO's "Devices" tab — Bluetooth pairing is
-   driven entirely by the MyOWO app.
-4. Run the calibration flow. **Do not skip this.** Calibration sets
-   your personal max intensity; the SDK's `intensityPercentage` is
-   interpreted as a percent of *that* maximum, so calibration is the
-   safety boundary.
-5. Open MyOWO's "Scan Games" panel — leave it open during smited
-   startup so the daemon's "smited haptic daemon" entry appears for
-   pairing.
+The OWO Visualizer is the recommended path for development and for any
+user who hasn't registered a project ID with OWO. It accepts dev-mode
+auth (any non-empty project ID), supports manual and auto-discovery
+connections, and surfaces the device calibration / connection status
+the daemon needs.
 
-## Enabling in smited
+### Setup
 
-Edit your user config file (`%APPDATA%\smited\config.json`):
+1. Download the OWO Visualizer from
+   [`https://owogame.com/developers/`](https://owogame.com/developers/)
+   under the "Sensation creator" / "Tools" sections.
+2. Power on the OWO Skin and pair it with the Visualizer the same way
+   you would with MyOWO. Calibration runs the same flow.
+3. In the Visualizer's main view, confirm the device battery indicator
+   and calibration status are shown.
+
+### smited configuration
 
 ```json
 {
@@ -47,8 +45,9 @@ Edit your user config file (`%APPDATA%\smited\config.json`):
           "Id": "owo-primary",
           "Enabled": true,
           "Options": {
-            "GameDisplayName": "smited haptic daemon",
-            "ManualIp": null,
+            "ProjectId": "smited-dev",
+            "ManualIp": "127.0.0.1",
+            "ConnectTimeoutSeconds": 10,
             "MaxReconnectAttempts": 3,
             "HeartbeatSeconds": 5
           }
@@ -59,33 +58,36 @@ Edit your user config file (`%APPDATA%\smited\config.json`):
 }
 ```
 
+`ProjectId` can be any non-empty string for the Visualizer; `smited-dev`
+is the documented default. `ManualIp` set to loopback because the
+Visualizer runs on the same machine as the daemon — auto-discovery
+also works, but loopback skips the discovery handshake. The OWO FAQ
+explicitly recommends manual connection if AutoConnect doesn't pair.
+`ConnectTimeoutSeconds` bounds the SDK's connect handshake — if the
+Visualizer doesn't accept the game within the deadline, the daemon
+continues with the OWO backend in `BACKEND_STATUS_DISCONNECTED`, and
+the heartbeat loop retries in the background.
+
 This replaces the default `mock_owo` descriptor that ships in
-`appsettings.json` (user-config keys win over the defaults), so the
-mock and real backends don't both register and serve
-`owo_skin`-kinded sensations. To run them side-by-side, list both as
-descriptors in the same `Items` array. Restart the daemon. The
-startup banner shows `owo-primary` registered. Switch to MyOWO's
-"Scan Games" panel and pick `smited haptic daemon` from the list —
-the daemon transitions to `BACKEND_STATUS_READY` once pairing
-completes.
+`appsettings.json` (user-config keys win over the defaults). To run
+both side-by-side, list both as descriptors in the same `Items` array.
 
-`ManualIp` skips the auto-discovery handshake when set. Use it when
-MyOWO runs on a different machine on your LAN, or when auto-discovery
-fails because of multicast filtering on your network.
+### Smoke test
 
-## Smoke-test runbook
+1. Run smited.
+2. The Visualizer's "Scan Games" panel should show the project ID
+   (`smited-dev`) within ~10 seconds.
+3. Click to accept. The daemon log shows
+   `OWO backend owo-primary connected, calibrated and ready`.
+4. Open the admin UI at `http://127.0.0.1:7779/`.
+5. Pick `compile_error_mild` against `owo-primary` and click FIRE.
+6. Brief sensation on the suit confirms end-to-end works.
 
-After the pairing handshake completes, verify the wiring with
-`grpcurl`:
+`grpcurl` flow for the same:
 
 ```sh
 grpcurl -plaintext localhost:7777 smited.v1.SmitedService/Health
 # Expected: backends includes owo-primary with status BACKEND_STATUS_READY.
-
-grpcurl -plaintext -d '{"backend_id":"owo-primary"}' \
-    localhost:7777 smited.v1.SmitedService/DescribeBackend
-# Expected: 10 zones (pectoral, abdominal, lumbar, dorsal, arm — L/R),
-# 6 parameters, calibration { calibrated: true, last_calibrated_at: ... }.
 
 grpcurl -plaintext -d '{
     "backend_id":"owo-primary",
@@ -104,38 +106,72 @@ Iterate the rest of the sample library:
 | `deploy_success`       | Gentle ramped wave across the torso              |
 | `chat_zap`             | Quick, localized hit                             |
 
+## Production (MyOWO consumer app)
+
+The MyOWO consumer app requires a registered project ID and a signed
+`.owoauth` file. Both are obtained by emailing `devs@owogame.com` per
+the OWO docs.
+
+1. Register the project at OWO. Email `devs@owogame.com` with developer
+   name, project name, sensation list, and an executable. See the OWO
+   docs at
+   [`https://owo-game.gitbook.io/owo-api/welcome/configure-your-project`](https://owo-game.gitbook.io/owo-api/welcome/configure-your-project).
+2. OWO sends back a project ID (a number/string assigned to your
+   project) and a `.owoauth` file with baked sensations.
+3. Configure smited with both:
+
+   ```json
+   {
+     "Kind": "owo_skin",
+     "Id": "owo-primary",
+     "Enabled": true,
+     "Options": {
+       "ProjectId": "12345",
+       "AuthFilePath": "C:\\path\\to\\smited.owoauth",
+       "ConnectTimeoutSeconds": 10
+     }
+   }
+   ```
+
+4. The smited daemon configures the SDK with `GameAuth.Parse` of the
+   `.owoauth` contents on startup. The MyOWO app's "Scan Games" panel
+   should then list the project under its registered name.
+
+`AuthString` (inline `.owoauth` contents) is supported as an
+alternative to `AuthFilePath` — useful for tests or for keeping auth
+out of the filesystem in containerized deployments. When both are set
+`AuthFilePath` wins and the daemon logs a warning.
+
+The unsigned-auth path (no `AuthFilePath` / `AuthString`) is what makes
+the Visualizer work for dev. MyOWO silently ignores unsigned auth, so
+omitting the auth file is what produced the "game doesn't show in
+Scan Games" symptom that motivated this refactor.
+
+## Prerequisites
+
+- **Windows 10 or 11.** The OWO SDK and both OWO desktop apps
+  (Visualizer and MyOWO) are Windows-only. Mac/Linux daemons run with
+  `MockOwoBackend` only — no shim available for the real device on
+  those platforms.
+- **An OWO Skin device, paired and fully calibrated** through whichever
+  desktop app you use. Calibration is mandatory: the SDK refuses to
+  send sensations to an uncalibrated user.
+- **The OWO desktop app running in the background** for the entire
+  lifetime of the daemon. The SDK talks to the desktop app over local
+  TCP; the app holds the Bluetooth pairing with the device. Closing
+  the app drops the daemon→device transport.
+
 ## Troubleshooting
 
-**`accepted=true` but no sensation on skin**
-1. MyOWO still showing "Connected" for the device? If not, re-pair via
-   MyOWO's Devices tab.
-2. Re-run calibration. Pads degrade over time; stale calibration may
-   read as too low to perceive.
-3. Check the gel pads. They need direct skin contact and lose
-   conductivity after roughly 50 sessions. Replace if older.
-
-**`INTERNAL` gRPC error or `accepted=false`**
-- Check `%LOCALAPPDATA%\smited\logs\smited-*.log` for the SDK
-  exception. The most common cause is MyOWO closing in the
-  background — restart MyOWO and the daemon will reconnect on the
-  next heartbeat tick (default 5 s).
-
-**Daemon banner shows OWO as registered but `Health` reports
-`DISCONNECTED`**
-- Transport drop detected by the heartbeat poll. Check MyOWO is
-  running. The daemon attempts reconnect with exponential backoff up
-  to `MaxReconnectAttempts`; on exhaustion `Status` flips to `ERROR`
-  and you must restart the daemon.
-
-**Banner doesn't show OWO at all on Windows**
-- Confirm an `owo_skin` descriptor exists in `Smited:Backends:Items`
-  with `Enabled: true`, and that `Smited.Daemon.Owo.dll` is in the
-  daemon's output directory. The daemon project copies it as content
-  on Windows builds. If the descriptor is present but the banner still
-  shows zero backends, check the log for `Factory for kind owo_skin
-  declined to create descriptor` — that means the assembly's runtime
-  dependency (`OWO.dll`) is missing; rebuild/republish to refresh the
-  output directory.
+| Symptom | Cause | Fix |
+|---|---|---|
+| Daemon log shows `OWO assembly load failed` | `Smited.Daemon.Owo.dll` is missing from the daemon output | Run `dotnet publish src/Smited.Daemon -c Debug -r win-x64`; verify `_TargetingWindows` evaluates true |
+| Daemon log shows `OWO backend owo-primary did not connect within Ns` | Visualizer/MyOWO didn't accept the game in time | Open the app, accept the project ID in Scan Games, check Windows Firewall |
+| Game doesn't appear in MyOWO's Scan Games panel | Unsigned auth (no real project ID + `.owoauth`) | Use the Visualizer for dev, OR register the project with OWO and set `AuthFilePath` |
+| Game appears in MyOWO but suit doesn't fire | Suit not paired / calibrated, or calibration drift | Re-pair via the desktop app's Devices tab; recalibrate. Gel pads need direct skin contact and lose conductivity after ~50 sessions |
+| Daemon banner shows OWO as registered but `Health` reports `DISCONNECTED` | Transport drop detected by the heartbeat poll | Check the desktop app is running. The daemon attempts reconnect with exponential backoff up to `MaxReconnectAttempts`; on exhaustion `Status` flips to `ERROR` |
+| Banner doesn't show OWO at all on Windows | OWO descriptor missing or factory declined | Confirm an `owo_skin` descriptor exists in `Smited:Backends:Items` with `Enabled: true`. Check the log for `Could not read AuthFilePath` (BackendConfigurationException) — that means the file path is wrong |
+| `accepted=true` but no sensation on skin | Stale calibration or worn-out gel pads | Recalibrate. Replace gel pads if older than ~50 sessions |
 
 ## Panic button
 

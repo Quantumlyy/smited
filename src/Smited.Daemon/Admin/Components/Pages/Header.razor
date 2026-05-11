@@ -3,11 +3,14 @@
 @inject DaemonStartTime StartTime
 @inject BackendRegistry Registry
 @inject EventStreamSubscriber Events
+@inject IBreakerService Breaker
 
 @*  Top-of-page status bar. Shows daemon name, ports, uptime, and a status
     pill that aggregates BackendStatus across all registered backends.
     Subscribes to BackendLifecycleEvent so the pill updates live; ticks
-    every second for the uptime readout.  *@
+    every second for the uptime readout. Also renders a daemon-wide
+    PANIC LATCHED banner when the breaker is tripped, with a Re-arm
+    button that opens the child <RearmDialog> via a @ref handle.  *@
 
 <header class="card">
     <div style="display:flex;justify-content:space-between;align-items:center">
@@ -24,10 +27,28 @@
     </div>
 </header>
 
+@if (_breakerState.IsTripped)
+{
+    <div class="banner-tripped" role="alert">
+        <strong>PANIC LATCHED</strong>
+        @if (_breakerState.TrippedAt is { } at)
+        {
+            <span>&nbsp;at @at.ToString("HH:mm:ss")</span>
+        }
+        <span>&nbsp;— reason: @(_breakerState.TripReason ?? "<unspecified>")</span>
+        &nbsp;
+        <button class="btn-primary" @onclick="OpenRearmDialog">Re-arm</button>
+    </div>
+}
+
+<RearmDialog @ref="_rearmDialog" />
+
 @code {
     private readonly CancellationTokenSource _cts = new();
     private Task? _uptimeLoop;
     private Task? _eventLoop;
+    private RearmDialog? _rearmDialog;
+    private BreakerState _breakerState = new(false, null, null);
 
     private string Uptime => FormatUptime(DateTimeOffset.UtcNow - StartTime.At);
 
@@ -52,6 +73,9 @@
 
     protected override void OnInitialized()
     {
+        _breakerState = new BreakerState(Breaker.IsTripped, Breaker.TrippedAt, Breaker.TripReason);
+        Breaker.StateChanged += OnBreakerStateChanged;
+
         _uptimeLoop = Task.Run(async () =>
         {
             try
@@ -81,8 +105,19 @@
         });
     }
 
+    private void OnBreakerStateChanged(BreakerState state)
+    {
+        _breakerState = state;
+        // The breaker fires StateChanged from the threadpool; marshal
+        // the re-render onto the SignalR circuit's thread.
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenRearmDialog() => _rearmDialog?.Show();
+
     public async ValueTask DisposeAsync()
     {
+        Breaker.StateChanged -= OnBreakerStateChanged;
         _cts.Cancel();
         if (_uptimeLoop is not null) try { await _uptimeLoop; } catch { }
         if (_eventLoop is not null) try { await _eventLoop; } catch { }

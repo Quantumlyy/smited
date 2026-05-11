@@ -27,17 +27,20 @@ internal sealed class SmitedActionService
 {
     private readonly TriggerCoordinator _coordinator;
     private readonly IHistoryRecorder _history;
+    private readonly IBreakerService _breaker;
     private readonly TimeProvider _time;
     private readonly ILogger<SmitedActionService> _logger;
 
     public SmitedActionService(
         TriggerCoordinator coordinator,
         IHistoryRecorder history,
+        IBreakerService breaker,
         TimeProvider time,
         ILogger<SmitedActionService> logger)
     {
         _coordinator = coordinator;
         _history = history;
+        _breaker = breaker;
         _time = time;
         _logger = logger;
     }
@@ -106,8 +109,19 @@ internal sealed class SmitedActionService
     {
         var timestamp = _time.GetUtcNow();
         _logger.LogCritical(
-            "PANIC stop requested (source={Source}, peer={Peer}, userAgent={UserAgent})",
+            "PANIC stop requested (source={Source}, peer={Peer}, userAgent={UserAgent}); tripping breaker and stopping all sensations across all backends",
             source, peer ?? "<n/a>", userAgent ?? "<n/a>");
+
+        // Trip the breaker FIRST, before StopAsync. A trigger arriving
+        // while StopAsync is mid-flight needs to be rejected, otherwise
+        // it slips past the coordinator's breaker check (untripped at
+        // that instant), gets accepted by the backend, and may insert
+        // into the backend's _activeSensations dictionary AFTER
+        // StopAsync's snapshot — so the panic stop misses it and the
+        // sensation continues playing. Tripping first closes that race.
+        // The coordinator's TriggerAsync also re-checks the breaker
+        // immediately before dispatch as a defense-in-depth measure.
+        _breaker.Trip($"panic from {source}");
 
         int stopped;
         try
@@ -118,7 +132,8 @@ internal sealed class SmitedActionService
         catch (Exception ex)
         {
             _logger.LogCritical(ex,
-                "PANIC stop FAILED (source={Source}); coordinator threw", source);
+                "PANIC stop FAILED (source={Source}); coordinator threw. Breaker is already tripped so triggers will keep rejecting until re-armed",
+                source);
             _ = _history.RecordPanicAsync(new PanicRecord
             {
                 Timestamp = timestamp,
@@ -132,7 +147,7 @@ internal sealed class SmitedActionService
         }
 
         _logger.LogCritical(
-            "PANIC stop completed (source={Source}, stoppedCount={StoppedCount})",
+            "PANIC stop completed (source={Source}, stoppedCount={StoppedCount}); breaker tripped",
             source, stopped);
 
         _ = _history.RecordPanicAsync(new PanicRecord

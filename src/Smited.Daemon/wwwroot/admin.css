@@ -63,3 +63,49 @@ button { font: inherit; cursor: pointer; }
     background: var(--err); color: #fff; border: 0; border-radius: 6px;
     padding: 1rem 2rem; font-weight: 700;
 }
+.btn-secondary {
+    background: transparent; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.5rem 1rem;
+}
+
+/* Daemon-wide circuit-breaker banner. Appears under the Header card
+   when the breaker is tripped (panic latched). The "Re-arm" button
+   inside opens RearmDialog. */
+.banner-tripped {
+    background: rgba(210,74,74,0.12);
+    border: 1px solid var(--err);
+    color: var(--err);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Modal backdrop + card used by RearmDialog. Plain inline styling on
+   the dialog itself; the backdrop intercepts off-modal clicks to
+   dismiss. Z-index sits above the Blazor error UI bar so the dialog
+   isn't clipped if the error bar surfaces. */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.modal-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    max-width: 32rem;
+    width: 90%;
+}
+.error { color: var(--err); }
+:root {
+    --muted-bg: #1f1f1f;
+}
