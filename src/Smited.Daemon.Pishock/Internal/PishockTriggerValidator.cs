@@ -52,13 +52,24 @@ internal static class PishockTriggerValidator
                 $"microsensations[{index}].parameters.intensity");
         }
 
-        var duration = MicrosensationReader.ReadDuration(micro, "duration");
+        var authoredDuration = MicrosensationReader.ReadDuration(micro, "duration");
+        // Compare the EFFECTIVE on-wire duration to the cap, not the
+        // authored value. Cloud rounds positive sub-second durations
+        // up to whole seconds, so an authored 1500ms vibrate with a
+        // 1500ms cap would pass authored-only validation and then
+        // fire as 2s on the device — silently exceeding the
+        // configured safety ceiling. LAN's effective == authored so
+        // the LAN path is unchanged.
+        var effectiveDuration = PishockDurationPolicy.Effective(options.Mode, authoredDuration);
         var maxDuration = TimeSpan.FromMilliseconds(options.MaxDurationMs);
-        if (duration > maxDuration)
+        if (effectiveDuration > maxDuration)
         {
+            var detail = effectiveDuration == authoredDuration
+                ? $"{authoredDuration.TotalMilliseconds}ms"
+                : $"{authoredDuration.TotalMilliseconds}ms (effective {effectiveDuration.TotalMilliseconds}ms via {options.Mode})";
             throw new BackendTriggerRejectedException(
                 TriggerErrorCode.InvalidParameter,
-                $"duration {duration.TotalMilliseconds}ms exceeds cap of {options.MaxDurationMs}ms",
+                $"duration {detail} exceeds cap of {options.MaxDurationMs}ms",
                 $"microsensations[{index}].parameters.duration");
         }
     }

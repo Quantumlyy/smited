@@ -232,11 +232,43 @@ public class MockPishockBackendTests
     [Fact]
     public async Task TriggerAsync_with_duration_above_cap_throws_invalid_parameter()
     {
-        var options = new PishockBackendOptions { MaxDurationMs = 500 };
+        var options = new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            MaxDurationMs = 500,
+        };
         var backend = NewBackend(out _, options);
         await using var __ = backend;
 
         var request = MakeRequest(op: PishockOp.Vibrate, durationMs: 1000, intensity: 30);
+
+        var act = async () => await backend.TriggerAsync(request, CancellationToken.None);
+        var ex = await act.Should().ThrowAsync<BackendTriggerRejectedException>();
+        ex.Which.Code.Should().Be(TriggerErrorCode.InvalidParameter);
+        ex.Which.Field.Should().Contain("duration");
+    }
+
+    [Fact]
+    public async Task TriggerAsync_in_cloud_mode_rejects_authored_at_cap_because_rounding_exceeds_it()
+    {
+        // Cloud rounds positive durations up to whole seconds. With
+        // MaxDurationMs=1500 and an authored 1500ms vibrate, the
+        // authored duration is exactly at the cap, but cloud fires
+        // it as 2 seconds on the device — over the safety ceiling.
+        // The validator must compare the EFFECTIVE duration (post-
+        // rounding) to the cap, not the authored value, so the
+        // configured ceiling actually applies to wire traffic.
+        var options = new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Cloud,
+            Username = "u", ApiKey = "k", ShareCode = "s",
+            MaxDurationMs = 1500,
+        };
+        var backend = NewBackend(out _, options);
+        await using var __ = backend;
+
+        var request = MakeRequest(op: PishockOp.Vibrate, durationMs: 1500, intensity: 30);
 
         var act = async () => await backend.TriggerAsync(request, CancellationToken.None);
         var ex = await act.Should().ThrowAsync<BackendTriggerRejectedException>();
