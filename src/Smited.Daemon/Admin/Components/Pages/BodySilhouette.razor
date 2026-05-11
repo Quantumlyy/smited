@@ -1,0 +1,252 @@
+@implements IDisposable
+@inject BackendRegistry Registry
+@inject BodyMapPageState State
+@inject Smited.Daemon.BodyMap.BodyMapState BodyMap
+@inject SmitedActionService Actions
+@inject TimeProvider Time
+@inject IBreakerService Breaker
+@inject ILogger<BodySilhouette> Log
+
+@*  Front+back human silhouette with every registered backend's zones
+    overlaid as positioned circles. Active zones pulse via SVG <animate>;
+    recently-fired zones fade out over 3s as a per-zone heatmap.
+
+    Coordinate mapping (see comment on ProjectToPane below):
+      - Body X=0 is anatomical LEFT; X=1 is anatomical RIGHT.
+      - Front view: viewer's right = anatomical left → flip X.
+      - Back  view: viewer's left  = anatomical left → no flip.
+
+    The 200ms timer drives the smooth fade between events; the actual
+    fade value is computed at render time from (now - LastFiredAt) so
+    we don't need a separate fade-state machine.  *@
+
+@if (_breakerState.IsTripped)
+{
+    <div class="bodymap-banner-tripped">
+        Panic latched — clicks won't fire. Re-arm via the header
+        banner to resume.
+    </div>
+}
+
+<div class="bodymap-canvas">
+    <svg viewBox="0 0 600 800"
+         xmlns="http://www.w3.org/2000/svg"
+         class="bodymap-svg"
+         preserveAspectRatio="xMidYMid meet">
+
+        <!-- Front pane -->
+        <g transform="translate(0, 0)">
+            <text x="150" y="20" class="bodymap-pane-label">Front</text>
+            @SilhouettePathMarkup
+            @foreach (var z in _frontZones)
+            {
+                var (cx, cy) = ProjectToPane(z.Position, isBack: false, 300, 800);
+                <ZoneMarker Zone="@z" Cx="@cx" Cy="@cy"
+                            OnHover="OnHover" OnClick="OnZoneClicked" />
+            }
+        </g>
+
+        <!-- Back pane -->
+        <g transform="translate(300, 0)">
+            <text x="150" y="20" class="bodymap-pane-label">Back</text>
+            @SilhouettePathMarkup
+            @foreach (var z in _backZones)
+            {
+                var (cx, cy) = ProjectToPane(z.Position, isBack: true, 300, 800);
+                <ZoneMarker Zone="@z" Cx="@cx" Cy="@cy"
+                            OnHover="OnHover" OnClick="OnZoneClicked" />
+            }
+        </g>
+    </svg>
+
+    @if (_hovered is { } h)
+    {
+        <ZoneTooltip Zone="@h" />
+    }
+
+    @if (_lastError is not null)
+    {
+        <div class="bodymap-toast-err">@_lastError</div>
+    }
+</div>
+
+@code {
+    private static readonly System.Globalization.CultureInfo _inv =
+        System.Globalization.CultureInfo.InvariantCulture;
+
+    [Parameter] public string? BackendFilter { get; set; }
+
+    private IReadOnlyList<RenderedZone> _frontZones = Array.Empty<RenderedZone>();
+    private IReadOnlyList<RenderedZone> _backZones = Array.Empty<RenderedZone>();
+    private RenderedZone? _hovered;
+    private string? _lastError;
+    private BreakerState _breakerState = new(false, null, null);
+    private System.Threading.Timer? _fadeTicker;
+
+    protected override void OnInitialized()
+    {
+        State.StateChanged += OnStateChanged;
+        _breakerState = new BreakerState(Breaker.IsTripped, Breaker.TrippedAt, Breaker.TripReason);
+        Breaker.StateChanged += OnBreakerStateChanged;
+        // Periodic re-render so the heatmap fade animates smoothly even
+        // when no events arrive between frames. The tick must run on
+        // the renderer dispatcher because RebuildZones writes
+        // _frontZones / _backZones — without InvokeAsync those writes
+        // race the Blazor render loop reading those same fields.
+        _fadeTicker = new System.Threading.Timer(_ =>
+        {
+            _ = InvokeAsync(() =>
+            {
+                RebuildZones();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(200));
+        RebuildZones();
+    }
+
+    protected override void OnParametersSet() => RebuildZones();
+
+    // Fires from BodyMapPageState's consumer thread (Task.Run inside
+    // ConsumeAsync). Marshal both the rebuild and the render onto the
+    // Blazor dispatcher so the field writes and the render that reads
+    // them serialize through the same circuit-bound queue.
+    private void OnStateChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            RebuildZones();
+            StateHasChanged();
+        });
+    }
+
+    // IBreakerService.StateChanged fires from arbitrary threads (the
+    // panic endpoint runs on Kestrel's request thread, for instance).
+    // Marshal both the field write and the render through the
+    // dispatcher for the same reason as OnStateChanged.
+    private void OnBreakerStateChanged(BreakerState state)
+    {
+        _ = InvokeAsync(() =>
+        {
+            _breakerState = state;
+            StateHasChanged();
+        });
+    }
+
+    private void RebuildZones()
+    {
+        var (front, back) = BodyMapRenderModel.Build(
+            backends: Registry.All,
+            activity: State.Snapshot(),
+            bodyMap: BodyMap,
+            now: Time.GetUtcNow(),
+            backendFilter: BackendFilter,
+            log: Log);
+
+        _frontZones = front;
+        _backZones = back;
+    }
+
+    /// <summary>Map body coords to SVG pixel coords inside a 300×800
+    /// pane. Flips X on the front view (anatomical-left → viewer's
+    /// right); leaves X as-is on the back view (anatomical-left →
+    /// viewer's left). Y is flipped because SVG y grows downward but
+    /// body Y=0 is feet (lowest on screen).</summary>
+    private static (double cx, double cy) ProjectToPane(
+        Smited.V1.PositionHint pos, bool isBack, double paneWidth, double paneHeight)
+    {
+        var x = isBack ? pos.X : 1f - pos.X;
+        var y = 1f - pos.Y;
+        return (x * paneWidth, y * paneHeight);
+    }
+
+    private void OnHover(RenderedZone? zone)
+    {
+        _hovered = zone;
+    }
+
+    private async Task OnZoneClicked(RenderedZone zone)
+    {
+        if (zone.IsForbidden)
+        {
+            // Forbidden zones don't fire from the body map. The bodymap
+            // validator would reject the trigger anyway; preempt the
+            // round-trip so the operator gets immediate feedback.
+            _lastError = $"Zone {zone.ZoneId} is forbidden on {zone.BackendDisplayName} — not fired";
+            _ = ClearErrorSoonAsync();
+            return;
+        }
+
+        var backend = Registry.TryGet(zone.BackendId);
+        if (backend is null)
+        {
+            _lastError = $"Backend {zone.BackendId} no longer registered";
+            _ = ClearErrorSoonAsync();
+            return;
+        }
+
+        var micro = backend.BuildDiagnosticMicrosensation();
+        var input = new ResolvedTriggerInput(
+            BackendId: zone.BackendId,
+            SensationName: null,
+            InlineMicrosensations: new[] { micro },
+            ZoneIds: new[] { zone.ZoneId },
+            IntensityScale: 100u,
+            Priority: 0,
+            ClientTraceId: $"bodymap-{Guid.NewGuid():n}");
+
+        try
+        {
+            var outcome = await Actions.TriggerAsync(input, TriggerSource.Admin, default);
+            if (outcome is TriggerOutcome.Rejected r)
+            {
+                _lastError = $"{r.Code}: {r.Message}";
+                _ = ClearErrorSoonAsync();
+            }
+            else
+            {
+                _lastError = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Body map diagnostic trigger failed for {Backend}/{Zone}",
+                zone.BackendId, zone.ZoneId);
+            _lastError = $"{ex.GetType().Name}: {ex.Message}";
+            _ = ClearErrorSoonAsync();
+        }
+    }
+
+    private async Task ClearErrorSoonAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        _lastError = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        State.StateChanged -= OnStateChanged;
+        Breaker.StateChanged -= OnBreakerStateChanged;
+        _fadeTicker?.Dispose();
+    }
+
+    // Inline minimal human silhouette (head + neck + torso + arms + legs).
+    // Stroke-only, no fill; sized to a 300x800 pane.
+    private MarkupString SilhouettePathMarkup => new(@"
+        <g class=""bodymap-silhouette"" fill=""none"" stroke=""#555"" stroke-width=""2"">
+            <!-- head -->
+            <ellipse cx=""150"" cy=""90"" rx=""42"" ry=""52"" />
+            <!-- neck -->
+            <rect x=""135"" y=""140"" width=""30"" height=""18"" rx=""4"" />
+            <!-- shoulders + torso -->
+            <path d=""M 80 175 Q 150 158 220 175 L 230 380 Q 215 410 195 415 L 105 415 Q 85 410 70 380 Z"" />
+            <!-- left arm (anatomical-left = viewer's right on front) -->
+            <path d=""M 230 178 Q 252 200 252 280 L 246 420 Q 244 432 234 434 Q 224 432 224 420 L 222 280 Q 222 210 230 178 Z"" />
+            <!-- right arm -->
+            <path d=""M 70 178 Q 48 200 48 280 L 54 420 Q 56 432 66 434 Q 76 432 76 420 L 78 280 Q 78 210 70 178 Z"" />
+            <!-- left leg -->
+            <path d=""M 152 415 L 195 415 Q 200 430 198 480 L 188 720 Q 186 735 175 738 Q 162 735 158 720 L 152 480 Z"" />
+            <!-- right leg -->
+            <path d=""M 148 415 L 105 415 Q 100 430 102 480 L 112 720 Q 114 735 125 738 Q 138 735 142 720 L 148 480 Z"" />
+        </g>");
+}

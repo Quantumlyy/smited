@@ -219,6 +219,17 @@ public sealed class OwoBackend : IHapticBackend
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
     /// <inheritdoc />
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        new(new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(60),
+            ["intensity"] = new ParameterValue.Number(60),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
+            ["ramp_up"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(30)),
+            ["ramp_down"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(30)),
+        });
+
+    /// <inheritdoc />
     public async Task ConnectAsync(CancellationToken ct)
     {
         Status = BackendStatus.Disconnected;
@@ -576,7 +587,9 @@ public sealed class OwoBackend : IHapticBackend
             _time.GetUtcNow(),
             request.SensationId,
             request.SensationName,
-            request.ClientTraceId));
+            request.ClientTraceId,
+            request.ZoneIds,
+            request.IntensityScale));
 
         _logger.LogInformation(
             "OWO backend {Id} firing {SensationId} ({SensationName}) on {Zones} for {Duration}",

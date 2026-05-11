@@ -107,6 +107,16 @@ public sealed class MockPishockBackend : IHapticBackend
 
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Mirrors <see cref="PishockBackend.BuildDiagnosticMicrosensation"/>
+    /// so smoke tests against the mock produce the same op/intensity/
+    /// duration the real backend would dispatch under the same
+    /// <see cref="PishockBackendOptions"/>.
+    /// </remarks>
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        PishockDescriptors.BuildDiagnosticMicrosensation(_options);
+
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
     public Task<BackendTriggerResult> TriggerAsync(
@@ -144,7 +154,8 @@ public sealed class MockPishockBackend : IHapticBackend
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),
-            request.SensationId, request.SensationName, request.ClientTraceId));
+            request.SensationId, request.SensationName, request.ClientTraceId,
+            request.ZoneIds, request.IntensityScale));
 
         // Log each microsensation up-front with its scheduled offset.
         // Logging during the playback task would be more faithful to the

@@ -12,7 +12,8 @@ public class EventBusTests
     private static EventBus NewBus() => new(NullLogger<EventBus>.Instance);
 
     private static SensationStarted Started(string id) =>
-        new("mock", DateTimeOffset.UtcNow, id, SensationName: null, ClientTraceId: "");
+        new("mock", DateTimeOffset.UtcNow, id, SensationName: null, ClientTraceId: "",
+            ZoneIds: Array.Empty<string>(), IntensityPercent: null);
 
     [Fact]
     public async Task Two_subscribers_receive_the_same_published_event()

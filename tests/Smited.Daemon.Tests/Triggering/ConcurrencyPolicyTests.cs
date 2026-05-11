@@ -197,6 +197,9 @@ public class ConcurrencyPolicyTests
         public Task<int> StopAsync(BackendStopRequest request, CancellationToken ct) =>
             Task.FromResult(0);
 
+        public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+            new(new Dictionary<string, ParameterValue>());
+
         public IAsyncEnumerable<BackendEvent> Events => AsyncEmpty();
 
         private static async IAsyncEnumerable<BackendEvent> AsyncEmpty()

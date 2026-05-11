@@ -105,6 +105,20 @@ public sealed class PishockBackend : IHapticBackend
 
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Vibrate by preference, never shock. The click-to-fire is a
+    /// zone-identification diagnostic, not a stress test. The
+    /// concrete parameters come from
+    /// <see cref="PishockDescriptors.BuildDiagnosticMicrosensation"/>
+    /// so the diagnostic adapts to per-descriptor AllowedOps,
+    /// MaxIntensityVibrate, and MaxDurationMs — without that the
+    /// hardcoded vibrate@60 always rejected on Beep-only or
+    /// MaxIntensityVibrate&lt;60 configurations.
+    /// </remarks>
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        PishockDescriptors.BuildDiagnosticMicrosensation(_options);
+
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
     public Task<BackendTriggerResult> TriggerAsync(
@@ -147,7 +161,8 @@ public sealed class PishockBackend : IHapticBackend
 
         EmitEvent(new SensationStarted(
             Id, _time.GetUtcNow(),
-            request.SensationId, request.SensationName, request.ClientTraceId));
+            request.SensationId, request.SensationName, request.ClientTraceId,
+            request.ZoneIds, request.IntensityScale));
 
         // Link to BOTH the caller's ct AND the backend's _disposing
         // token so disposal aborts every pending await across every

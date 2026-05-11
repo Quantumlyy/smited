@@ -23,6 +23,12 @@ internal static class AdminConfiguration
         // race components against each other for events.
         services.AddTransient<EventStreamSubscriber>();
         services.AddScoped<HistoryQueryService>();
+        // BodyMapPageState is a singleton EventBus consumer driving the
+        // /bodymap admin page. The hosted-service alias drives its
+        // StartAsync/StopAsync lifecycle while the singleton lets
+        // Blazor components inject the same instance to read state.
+        services.AddSingleton<BodyMapPageState>();
+        services.AddHostedService(sp => sp.GetRequiredService<BodyMapPageState>());
         return services;
     }
 }

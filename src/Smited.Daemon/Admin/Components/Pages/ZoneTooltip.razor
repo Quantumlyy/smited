@@ -1,0 +1,22 @@
+@*  Pinned hover tooltip for a single zone on the body map.
+    Position is fixed by the parent (top-right of the canvas) via
+    .bodymap-tooltip in admin.css. Pointer events are disabled so the
+    tooltip never steals the next zone's hover.  *@
+
+<div class="bodymap-tooltip">
+    <div class="bodymap-tooltip-zone">@Zone.ZoneDisplayName</div>
+    <div class="bodymap-tooltip-id">@Zone.ZoneId</div>
+    <div class="bodymap-tooltip-backend">@Zone.BackendDisplayName (@Zone.BackendKind)</div>
+    <div class="bodymap-tooltip-pos">
+        body: (@Zone.Position.X.ToString("F2"), @Zone.Position.Y.ToString("F2"), @Zone.Position.Z.ToString("F2"))
+    </div>
+    @if (Zone.IsForbidden)
+    {
+        <div class="bodymap-tooltip-forbidden">FORBIDDEN (bodymap validator will reject)</div>
+    }
+    <div class="bodymap-tooltip-hint">Click to fire diagnostic</div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public RenderedZone Zone { get; set; } = default!;
+}

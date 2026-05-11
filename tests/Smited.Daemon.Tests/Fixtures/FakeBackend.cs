@@ -73,6 +73,9 @@ internal sealed class FakeBackend : IHapticBackend
     public Task<int> StopAsync(BackendStopRequest request, CancellationToken ct) =>
         OnStop?.Invoke(request, ct) ?? Task.FromResult(0);
 
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        new(new Dictionary<string, Smited.Daemon.Backends.Internal.ParameterValue>());
+
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
     public void Emit(BackendEvent evt) => _events.Writer.TryWrite(evt);

@@ -40,6 +40,23 @@ public class MockPishockBackendTests
     }
 
     [Fact]
+    public void BuildDiagnosticMicrosensation_uses_vibrate_not_shock_and_covers_required_params()
+    {
+        var backend = NewBackend(out _);
+        var diag = backend.BuildDiagnosticMicrosensation();
+
+        var required = backend.Parameters.Parameters.Where(p => p.Required).Select(p => p.Name);
+        diag.Values.Keys.Should().Contain(required,
+            "the diagnostic must carry every required parameter or PishockTriggerValidator will reject");
+
+        diag.Values.Should().ContainKey("op");
+        var op = diag.Values["op"];
+        op.Should().BeOfType<ParameterValue.EnumValue>()
+            .Which.Value.Should().Be("vibrate",
+                "click-to-fire is a zone-identification diagnostic and MUST NOT default to shock");
+    }
+
+    [Fact]
     public void DisplayName_falls_back_to_descriptor_id_when_options_unset()
     {
         var backend = NewBackend(out _, id: "left-thigh");
