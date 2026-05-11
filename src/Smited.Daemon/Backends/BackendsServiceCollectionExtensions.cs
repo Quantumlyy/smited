@@ -19,6 +19,24 @@ internal static class BackendsServiceCollectionExtensions
     {
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IBackendFactory, MockOwoBackendFactory>());
+
+        // One MockBhapticsBackendFactory instance per supported kind:
+        // BackendBootstrapper.ResolveFactory does FirstOrDefault on
+        // factory.Kind == descriptor.Kind, so each kind needs its own
+        // IBackendFactory. The factory itself is a thin dispatcher; the
+        // backends behind it are the MockBhapticsVest/Sleeve/Feet
+        // singletons registered in Program.cs.
+        //
+        // We use Add (not TryAddEnumerable) because the descriptor's
+        // ImplementationType is the same MockBhapticsBackendFactory
+        // class for every kind, and TryAddEnumerable would refuse the
+        // second through fifth registrations as duplicates. AddSmitedBackends
+        // is called once at startup so there's no idempotency concern.
+        foreach (var kind in MockBhapticsBackendFactory.SupportedKinds)
+        {
+            services.Add(
+                ServiceDescriptor.Singleton<IBackendFactory>(_ => new MockBhapticsBackendFactory(kind)));
+        }
         return services;
     }
 
@@ -205,9 +223,15 @@ internal static class BackendsServiceCollectionExtensions
         // DI; the kind constant is passed positionally as the first
         // constructor argument (matches BhapticsBackendFactory's ctor
         // signature exactly).
+        //
+        // Add (not TryAddEnumerable) — same reasoning as in
+        // AddSmitedBackends for the mock equivalents: every kind uses
+        // the same BhapticsBackendFactory class, and TryAddEnumerable
+        // would refuse the duplicate ImplementationType. This extension
+        // is called once at startup so there's no idempotency concern.
         foreach (var kind in BhapticsKinds)
         {
-            services.TryAddEnumerable(
+            services.Add(
                 ServiceDescriptor.Singleton<IBackendFactory>(sp =>
                     (IBackendFactory)ActivatorUtilities.CreateInstance(sp, factoryType, kind)));
         }

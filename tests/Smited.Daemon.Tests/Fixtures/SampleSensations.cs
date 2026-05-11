@@ -64,4 +64,40 @@ internal static class SampleSensations
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, fileName), contents);
     }
+
+    /// <summary>
+    /// A minimal valid bHaptics vest sensation file - left pectoral pulse,
+    /// 100ms, intensity 50. Targets <c>mock_bhaptics_vest</c> by
+    /// <c>backend_kind</c> so the sensation loader binds it to the mock
+    /// at boot.
+    /// </summary>
+    public const string BhapticsVestPectoralPulse = """
+        {
+          "name": "bhaptics_pectoral_pulse",
+          "backend_kind": "mock_bhaptics_vest",
+          "display_name": "bHaptics Pectoral Pulse",
+          "description": "Single pulse across the left pectoral.",
+          "tags": ["test"],
+          "default_zone_ids": ["pectoral_l"],
+          "default_intensity": 50,
+          "estimated_duration": "0.1s",
+          "definition": {
+            "microsensations": [
+              {
+                "parameters": {
+                  "intensity": { "number": 50 },
+                  "duration": { "duration": "0.1s" }
+                }
+              }
+            ]
+          }
+        }
+        """;
+
+    public static void WriteBhapticsVest(string libraryRoot, string fileName, string contents)
+    {
+        var dir = Path.Combine(libraryRoot, "mock_bhaptics_vest");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, fileName), contents);
+    }
 }

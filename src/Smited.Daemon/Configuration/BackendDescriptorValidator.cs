@@ -64,6 +64,15 @@ internal static partial class BackendDescriptorValidator
             "bhaptics_sleeve_r",
             "bhaptics_feet_l",
             "bhaptics_feet_r",
+            // Mock bhaptics backends are DI singletons (vest plain, sleeve
+            // and feet keyed by side). Two descriptors of the same mock
+            // kind would clobber each other's Id / DisplayName overrides
+            // the same way two mock_owo descriptors would.
+            "mock_bhaptics_vest",
+            "mock_bhaptics_sleeve_l",
+            "mock_bhaptics_sleeve_r",
+            "mock_bhaptics_feet_l",
+            "mock_bhaptics_feet_r",
         };
 
     /// <summary>

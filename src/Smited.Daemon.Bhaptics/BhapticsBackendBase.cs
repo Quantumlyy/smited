@@ -110,7 +110,7 @@ public abstract class BhapticsBackendBase : IHapticBackend
         Zones = zones;
         ForbiddenRegions = forbiddenRegions;
 
-        Parameters = BuildBhapticsParameters();
+        Parameters = BhapticsBackendParameters.Build();
         Concurrency = new ConcurrencyModel
         {
             MaxConcurrent = 1,
@@ -792,57 +792,6 @@ public abstract class BhapticsBackendBase : IHapticBackend
         }
         catch (ObjectDisposedException) { }
     }
-
-    /// <summary>
-    /// Build the <see cref="ParameterSchema"/> shared by every
-    /// bHaptics backend kind. Five parameters: <c>intensity</c>,
-    /// <c>duration</c>, <c>ramp_up</c>, <c>ramp_down</c>,
-    /// <c>exit_delay</c>. NO <c>frequency</c> — bHaptics is
-    /// vibrotactile and the SDK has no frequency knob. A sensation
-    /// file that declares <c>frequency</c> against a <c>bhaptics_*</c>
-    /// backend fails at SensationLoader boot via the existing
-    /// "parameter not declared by backend" validation rule.
-    /// </summary>
-    internal static ParameterSchema BuildBhapticsParameters()
-    {
-        var s = new ParameterSchema();
-        s.Parameters.Add(MakeNumber("intensity", required: true, min: 0, max: 100, unit: "%",
-            description: "Vibration intensity (% of motor maximum)"));
-        s.Parameters.Add(MakeDuration("duration", required: true, min: 0, max: 10,
-            description: "Active vibration length"));
-        s.Parameters.Add(MakeDuration("ramp_up", required: false, min: 0, max: 5,
-            description: "Quiet pre-pulse spacing"));
-        s.Parameters.Add(MakeDuration("ramp_down", required: false, min: 0, max: 5,
-            description: "Quiet post-pulse spacing"));
-        s.Parameters.Add(MakeDuration("exit_delay", required: false, min: 0, max: 5,
-            description: "Quiet trailing delay"));
-        return s;
-    }
-
-    private static ParameterDef MakeNumber(
-        string name, bool required, double min, double max, string unit, string description) =>
-        new()
-        {
-            Name = name,
-            Type = ParameterType.Number,
-            Required = required,
-            Min = min,
-            Max = max,
-            Unit = unit,
-            Description = description,
-        };
-
-    private static ParameterDef MakeDuration(
-        string name, bool required, double min, double max, string description) =>
-        new()
-        {
-            Name = name,
-            Type = ParameterType.Duration,
-            Required = required,
-            Min = min,
-            Max = max,
-            Description = description,
-        };
 
     /// <summary>
     /// Tracks an in-flight playback's cancellation source plus a

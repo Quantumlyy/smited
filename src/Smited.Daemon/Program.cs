@@ -56,6 +56,20 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
+// Mock bHaptics backends. Vest is a plain singleton; sleeve and feet
+// are keyed by "left"/"right" so the factory can resolve the correct
+// instance per descriptor kind. Tests resolve concrete types directly
+// from DI (BhapticsE2ETests / DaemonFixture do this).
+builder.Services.AddSingleton<MockBhapticsVestBackend>();
+builder.Services.AddKeyedSingleton<MockBhapticsSleeveBackend>("left",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsSleeveBackend>(sp, "left"));
+builder.Services.AddKeyedSingleton<MockBhapticsSleeveBackend>("right",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsSleeveBackend>(sp, "right"));
+builder.Services.AddKeyedSingleton<MockBhapticsFeetBackend>("left",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsFeetBackend>(sp, "left"));
+builder.Services.AddKeyedSingleton<MockBhapticsFeetBackend>("right",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsFeetBackend>(sp, "right"));
+
 builder.Services.AddSingleton<BodyMapValidator>();
 builder.Services.AddSingleton<BodyMapState>();
 builder.Services.AddSingleton<IBodyMapState>(sp => sp.GetRequiredService<BodyMapState>());
