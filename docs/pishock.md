@@ -174,7 +174,9 @@ mechanics.
 PiShock sensations use the daemon's existing backend-agnostic
 parameter format. Each microsensation declares four parameters:
 
-- `op` — Enum of `Vibrate`, `Beep`, or `Shock` (filtered by `AllowedOps`).
+- `op` — Enum of `vibrate`, `beep`, or `shock` (lowercase to satisfy
+  the wire's protovalidate ident pattern; gated by the descriptor's
+  `AllowedOps` at trigger time).
 - `duration` — Per-op duration as a Duration string (`"0.5s"`, `"100ms"`).
 - `intensity` — Number, 0..100. Per-op caps apply at trigger time.
 - `delay_before` — Optional Duration. The quiet gap before this microsensation fires.

@@ -301,6 +301,10 @@ across every backend, including PiShock. Bind it to a Stream Deck
 button or hardware emergency stop. Note: PiShock's wire protocol has
 no "cancel an in-progress op" message; panic frees the daemon's
 concurrency slots immediately, but a pulse already in flight on the
-device finishes its authored duration before stopping. Keep
-`MaxDurationMs` short enough that this delay is acceptable for your
-use case.
+device finishes its **effective on-wire duration** before stopping.
+For LAN-mode descriptors that's the authored milliseconds; for
+Cloud-mode descriptors the API minimum is one whole second so a
+100ms cloud pulse keeps firing for ~1s regardless of the authored
+value. `docs/pishock.md` § Panic button has the full mapping. Keep
+`MaxDurationMs` short enough — and prefer LAN if you need sub-second
+panic responsiveness — so this delay is acceptable for your use case.
