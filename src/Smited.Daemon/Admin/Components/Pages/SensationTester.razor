@@ -1,13 +1,21 @@
+@implements IDisposable
 @using RegisteredSensation = Smited.Daemon.Sensations.RegisteredSensation
 @inject BackendRegistry Registry
 @inject SensationLibrary Sensations
 @inject SmitedActionService Actions
+@inject IBreakerService Breaker
 
 @*  Sensation tester. Pick backend → pick sensation → FIRE. Result line
     shows accepted=true/false plus error info on rejection. Constructs
     ResolvedTriggerInput in-process and dispatches through
     SmitedActionService so the admin path produces the same history
-    rows the gRPC path does.  *@
+    rows the gRPC path does.
+
+    The FIRE button is also disabled when the daemon-wide breaker is
+    tripped. The coordinator already rejects with a BREAKER_TRIPPED
+    message so a click would round-trip and surface as a rejection,
+    but disabling the button up-front gives clearer UX and matches
+    the muted helper text below it.  *@
 
 <section class="card">
     <h2>Sensation tester</h2>
@@ -48,8 +56,16 @@
             </div>
         </details>
 
-        <button class="btn-primary" @onclick="Fire" disabled="@string.IsNullOrEmpty(_selectedSensationName)">FIRE</button>
+        <button class="btn-primary" @onclick="Fire"
+                disabled="@(_breakerTripped || string.IsNullOrEmpty(_selectedSensationName))">FIRE</button>
     </div>
+
+    @if (_breakerTripped)
+    {
+        <p style="color:var(--muted);font-size:0.85rem;margin-top:0.5rem">
+            Panic latched. Re-arm via the header banner to resume.
+        </p>
+    }
 
     @if (_lastResult is not null)
     {
@@ -76,6 +92,7 @@
     private string _traceId = "";
     private IReadOnlyList<RegisteredSensation> _sensations = Array.Empty<RegisteredSensation>();
     private FireResult? _lastResult;
+    private bool _breakerTripped;
 
     protected override void OnInitialized()
     {
@@ -83,6 +100,19 @@
         _selectedBackendId = Registry.All.FirstOrDefault()?.Id;
         ReloadSensations();
         _selectedSensationName = _sensations.FirstOrDefault()?.Name;
+        _breakerTripped = Breaker.IsTripped;
+        Breaker.StateChanged += OnBreakerStateChanged;
+    }
+
+    private void OnBreakerStateChanged(BreakerState state)
+    {
+        _breakerTripped = state.IsTripped;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Breaker.StateChanged -= OnBreakerStateChanged;
     }
 
     private void OnBackendChanged()

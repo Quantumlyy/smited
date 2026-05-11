@@ -223,24 +223,136 @@ public sealed class OwoBackend : IHapticBackend
     {
         Status = BackendStatus.Disconnected;
 
-        _sdk.Configure(_options.GameDisplayName);
+        // Resolve the .owoauth contents (if any) before Configure. The
+        // SDK's GameAuth.Parse path is what MyOWO requires; the no-auth
+        // GameAuth.Create() path is enough for the OWO Visualizer (the
+        // canonical dev target) but produces an unsigned auth that the
+        // MyOWO consumer app silently ignores. AuthFilePath wins over
+        // AuthString when both are set; that ordering keeps file-based
+        // production deployments deterministic when a misconfigured
+        // descriptor specifies both.
+        string? authString = null;
+        if (!string.IsNullOrEmpty(_options.AuthFilePath))
+        {
+            if (!string.IsNullOrEmpty(_options.AuthString))
+            {
+                _logger.LogWarning(
+                    "OWO backend {Id} has both AuthFilePath and AuthString set; using AuthFilePath",
+                    Id);
+            }
+            try
+            {
+                authString = await File.ReadAllTextAsync(_options.AuthFilePath, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Misconfiguration the user must fix — bad path, no
+                // permissions, etc. Throw the typed
+                // BackendConfigurationException so the bootstrapper
+                // attributes the failure cleanly and aborts startup
+                // (same behaviour as SmitedStartupException).
+                throw new BackendConfigurationException(
+                    Id, Kind,
+                    $"Could not read AuthFilePath '{_options.AuthFilePath}': {ex.Message}",
+                    ex);
+            }
+        }
+        else if (!string.IsNullOrEmpty(_options.AuthString))
+        {
+            authString = _options.AuthString;
+        }
 
         try
         {
+            _sdk.Configure(_options.ProjectId, authString);
+        }
+        catch (Exception ex)
+        {
+            // GameAuth.Parse rejects malformed .owoauth payloads with
+            // FormatException / ArgumentException; OWO.Configure can
+            // also surface SDK-level issues here. All of these are
+            // user-fixable configuration mistakes (bad payload content,
+            // wrong ProjectId format), the same category as an
+            // unreadable AuthFilePath — and we want the same fatal
+            // treatment. Without this wrap, a malformed AuthString
+            // would propagate as the SDK's generic exception type,
+            // BackendBootstrapper would treat it as a transient
+            // ConnectAsync failure and log-and-skip, and the daemon
+            // would run silently without the configured OWO backend.
+            var hint = authString is not null
+                ? "Verify the .owoauth payload is well-formed (from OWO's Sensations Creator tool) "
+                  + "and the ProjectId matches the registered project."
+                : "Verify the ProjectId is accepted by the OWO SDK.";
+            throw new BackendConfigurationException(
+                Id, Kind,
+                $"OWO SDK rejected the supplied configuration: {ex.Message}. {hint}",
+                ex);
+        }
+
+        var deadline = _options.ConnectTimeoutSeconds > 0
+            ? TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds)
+            : Timeout.InfiniteTimeSpan;
+
+        try
+        {
+            Task connectTask;
             if (!string.IsNullOrEmpty(_options.ManualIp))
             {
                 _logger.LogInformation(
                     "OWO backend {Id} connecting to MyOWO at {Ip}",
                     Id, _options.ManualIp);
-                await _sdk.ConnectAsync(_options.ManualIp).WaitAsync(ct).ConfigureAwait(false);
+                connectTask = _sdk.ConnectAsync(_options.ManualIp);
             }
             else
             {
                 _logger.LogInformation(
                     "OWO backend {Id} auto-connecting to MyOWO; pick this entry in the MyOWO 'Scan Games' panel if pairing stalls",
                     Id);
-                await _sdk.AutoConnectAsync().WaitAsync(ct).ConfigureAwait(false);
+                connectTask = _sdk.AutoConnectAsync();
             }
+
+            if (deadline == Timeout.InfiniteTimeSpan)
+            {
+                await connectTask.WaitAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await connectTask.WaitAsync(deadline, ct).ConfigureAwait(false);
+            }
+        }
+        catch (TimeoutException)
+        {
+            // The SDK's connect handshake didn't complete within the
+            // deadline. Daemon startup must continue so other backends,
+            // the gRPC listener, and the admin UI come up. The heartbeat
+            // loop (started below) polls IsConnected; if MyOWO / the OWO
+            // Visualizer accepts the game later, the next tick observes
+            // a Disconnected -> Ready transition and flips Status to
+            // Ready automatically without a daemon restart.
+            //
+            // The heartbeat poll alone isn't enough though: it only
+            // calls TryReconnectAsync on a Disconnected -> Ready
+            // transition, which never fires when the initial connect
+            // itself never completed (_lastSeenConnected stayed false
+            // and IsConnected stays false). Without an active retry,
+            // a permanently-stuck SDK leaves the backend disconnected
+            // until daemon restart - contradicting the warning text
+            // above and the docs. Kick off TryReconnectAsync explicitly
+            // so each attempt issues a fresh connect call (with its own
+            // backoff) and the heartbeat-driven status flip can occur
+            // when the SDK's connect eventually succeeds.
+            Status = BackendStatus.Disconnected;
+            _logger.LogWarning(
+                "OWO backend {Id} did not connect within {Seconds}s; daemon will continue and reconnect attempts will keep retrying in the background. "
+              + "Common causes: OWO Visualizer or MyOWO not running, the app did not accept the game in 'Scan Games', "
+              + "network/firewall blocking the broadcast, or a wrong project ID / .owoauth file.",
+                Id, _options.ConnectTimeoutSeconds);
+            StartHeartbeat();
+            if (_options.MaxReconnectAttempts > 0)
+            {
+                _ = TryReconnectAsync(_lifetimeCts!.Token);
+            }
+            return;
         }
         catch (OperationCanceledException)
         {
@@ -357,6 +469,15 @@ public sealed class OwoBackend : IHapticBackend
 
     private async Task TryReconnectAsync(CancellationToken ct)
     {
+        // Bound each per-attempt connect call by the same deadline that
+        // the initial ConnectAsync uses. Without this, a permanently-
+        // stuck SDK leaves the very first reconnect attempt hanging on
+        // its WaitAsync and we never reach the next iteration of the
+        // backoff loop — defeating the point of MaxReconnectAttempts.
+        var deadline = _options.ConnectTimeoutSeconds > 0
+            ? TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds)
+            : Timeout.InfiniteTimeSpan;
+
         for (var attempt = 1; attempt <= _options.MaxReconnectAttempts; attempt++)
         {
             try
@@ -364,13 +485,17 @@ public sealed class OwoBackend : IHapticBackend
                 var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                 await Task.Delay(backoff, _time, ct).ConfigureAwait(false);
 
-                if (!string.IsNullOrEmpty(_options.ManualIp))
+                Task connectTask = !string.IsNullOrEmpty(_options.ManualIp)
+                    ? _sdk.ConnectAsync(_options.ManualIp)
+                    : _sdk.AutoConnectAsync();
+
+                if (deadline == Timeout.InfiniteTimeSpan)
                 {
-                    await _sdk.ConnectAsync(_options.ManualIp).WaitAsync(ct).ConfigureAwait(false);
+                    await connectTask.WaitAsync(ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    await _sdk.AutoConnectAsync().WaitAsync(ct).ConfigureAwait(false);
+                    await connectTask.WaitAsync(deadline, ct).ConfigureAwait(false);
                 }
 
                 if (_sdk.IsConnected)
@@ -382,6 +507,15 @@ public sealed class OwoBackend : IHapticBackend
                     // BackendLifecycleEvent itself; nothing to do here.
                     return;
                 }
+            }
+            catch (TimeoutException)
+            {
+                // This attempt's connect didn't finish within the
+                // deadline. Fall through to the next iteration's
+                // backoff so a hung SDK still exhausts attempts.
+                _logger.LogDebug(
+                    "OWO backend {Id} reconnect attempt {Attempt} timed out after {Seconds}s",
+                    Id, attempt, _options.ConnectTimeoutSeconds);
             }
             catch (OperationCanceledException)
             {

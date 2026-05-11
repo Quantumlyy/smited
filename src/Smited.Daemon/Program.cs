@@ -45,6 +45,8 @@ builder.Services.AddSingleton<SensationLibrary>();
 builder.Services.AddSingleton<ConcurrencyEnforcer>();
 builder.Services.AddSingleton<TriggerCoordinator>();
 builder.Services.AddSingleton<SmitedActionService>();
+builder.Services.AddSingleton<IBreakerService, BreakerService>();
+builder.Services.AddSingleton<IBreakerChallengeService, BreakerChallengeService>();
 builder.Services.AddSingleton<DaemonStartTime>();
 
 builder.Services.AddSingleton<MockOwoBackend>();
@@ -162,6 +164,7 @@ app.MapPanic();
             branch.UseEndpoints(endpoints =>
             {
                 endpoints.MapBlazorHub();
+                endpoints.MapBreaker();
                 endpoints.MapFallbackToPage("/_Host");
             });
         });

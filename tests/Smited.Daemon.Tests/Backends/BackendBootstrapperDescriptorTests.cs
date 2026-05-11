@@ -167,6 +167,35 @@ public class BackendBootstrapperDescriptorTests
     }
 
     [Fact]
+    public async Task ConnectAsync_throwing_BackendConfigurationException_aborts_startup()
+    {
+        // The factory-throw policy (above) makes user-fixable config
+        // mistakes fatal at TryCreate time. The OWO backend's
+        // AuthFilePath check runs in ConnectAsync (file IO can't
+        // sensibly happen in TryCreate). Without rethrowing the typed
+        // BackendConfigurationException from RegisterAndFan, a bad
+        // production .owoauth path would log-and-skip the OWO backend
+        // and leave the daemon running without haptics — the worst
+        // possible outcome (admin thinks daemon is healthy; nothing
+        // fires). This test locks in the rethrow.
+        var items = new[]
+        {
+            new BackendDescriptor { Kind = "bad_auth", Id = "boom", Enabled = true },
+        };
+
+        var act = async () => await Build(
+            items,
+            extraFactories: new IBackendFactory[]
+            {
+                new BackendConfigurationThrowingFactory(),
+            });
+
+        var ex = await act.Should().ThrowAsync<BackendConfigurationException>();
+        ex.Which.BackendId.Should().Be("boom");
+        ex.Which.BackendKind.Should().Be("bad_auth");
+    }
+
+    [Fact]
     public async Task Empty_kind_aborts_startup()
     {
         var items = new[] { new BackendDescriptor { Id = "mock-owo" } };
@@ -294,5 +323,28 @@ public class BackendBootstrapperDescriptorTests
             Microsoft.Extensions.Logging.ILogger logger) =>
             throw new InvalidOperationException(
                 "simulated config error: HeartbeatSeconds is not a number");
+    }
+
+    /// <summary>
+    /// Builds a backend whose <c>ConnectAsync</c> throws
+    /// <see cref="BackendConfigurationException"/> — the same shape the
+    /// real OWO backend produces when its <c>AuthFilePath</c> is
+    /// unreadable. Lets us assert the bootstrapper rethrows the typed
+    /// exception instead of skipping the backend.
+    /// </summary>
+    private sealed class BackendConfigurationThrowingFactory : IBackendFactory
+    {
+        public string Kind => "bad_auth";
+
+        public IHapticBackend? TryCreate(
+            BackendDescriptor descriptor,
+            IConfigurationSection optionsSection,
+            IServiceProvider services,
+            Microsoft.Extensions.Logging.ILogger logger) =>
+            new FakeBackend(id: descriptor.Id, kind: Kind)
+            {
+                OnConnect = _ => throw new BackendConfigurationException(
+                    descriptor.Id, Kind, "simulated unreadable AuthFilePath"),
+            };
     }
 }

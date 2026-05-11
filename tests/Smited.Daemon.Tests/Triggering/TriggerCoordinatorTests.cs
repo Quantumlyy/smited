@@ -274,6 +274,7 @@ public class TriggerCoordinatorTests
             library,
             concurrency,
             new BodyMapState(),
+            new BreakerService(time),
             time,
             NullLogger<TriggerCoordinator>.Instance);
 
