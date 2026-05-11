@@ -1,0 +1,84 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RootNamespace>Smited.Daemon.Bhaptics</RootNamespace>
+    <AssemblyName>Smited.Daemon.Bhaptics</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      Same Windows-targeting rationale as Smited.Daemon.Owo: this project
+      only ever produces a Windows assembly, and setting
+      EnableWindowsTargeting unconditionally lets `dotnet build` /
+      `dotnet publish` succeed when invoked from Mac/Linux hosts (CI,
+      dev machines) without the caller having to pass
+      -p:EnableWindowsTargeting=true. No-op on Windows hosts.
+    -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!--
+      Force the Bhaptics.Tac NuGet's runtime assemblies (Bhaptics.Tac.dll
+      and its transitive deps) to lay out next to this project's primary
+      output. CopyLocalLockFileAssemblies only fires on a publish step
+      by default for library projects; the daemon csproj loads this
+      assembly reflectively and never publishes us itself, so without
+      this knob the bin folder would be missing the SDK runtime DLLs
+      that ResolveBhapticsBackendRuntime in Smited.Daemon.csproj then
+      reaches in to copy into the daemon's output directory.
+    -->
+    <CopyLocalLockFileAssemblies Condition="'$(_TargetingWindows)' == 'true'">true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!--
+    Like the OWO project, the bHaptics project references the
+    abstractions project (NOT the daemon host) so the build graph stays
+    acyclic. The daemon imports IHapticBackend and IBhapticsSdk from the
+    Abstractions assembly and loads BhapticsBackendFactory / StaticBhapticsSdk
+    via Type.GetType reflection at runtime.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Smited.Daemon.Abstractions\Smited.Daemon.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Smited.Daemon.Tests" />
+  </ItemGroup>
+
+  <!--
+    Bhaptics.Tac is a Windows-native NuGet package; only restore when
+    targeting Windows so `dotnet build` on Mac produces an empty
+    assembly without trying to pull a package that won't load on
+    non-Windows runtimes. Version is centrally managed in
+    Directory.Packages.props.
+
+    NoWarn=NU1701 is intentional: the latest Bhaptics.Tac (1.4.2) only
+    publishes .NET Framework assets, so NuGet falls back to the
+    netstandard/net4x compatibility shim when restoring against
+    net9.0-windows. We accept that shim: SDK1's surface is
+    primitive-only (no WPF, no WinForms, just a HapticPlayer object
+    that opens a local WebSocket) and runs cleanly on .NET 9 via
+    referenced-NetFramework-assembly support. Without the suppression
+    TreatWarningsAsErrors in Directory.Build.props promotes NU1701 to
+    an error and the project fails to restore on any cross-build.
+  -->
+  <ItemGroup Condition="'$(_TargetingWindows)' == 'true'">
+    <PackageReference Include="Bhaptics.Tac" NoWarn="NU1701" />
+  </ItemGroup>
+
+  <!--
+    BhapticsBackendBase / Vest / Sleeve / Feet / Factory and
+    StaticBhapticsSdk reference the Bhaptics.Tac namespace. Targeting
+    `net9.0-windows` means the WINDOWS symbol is defined regardless of
+    build host, so we additionally exclude these files from compile
+    when not targeting Windows so the project builds to an empty
+    assembly without the SDK package.
+  -->
+  <ItemGroup Condition="'$(_TargetingWindows)' != 'true'">
+    <Compile Remove="BhapticsBackendBase.cs" />
+    <Compile Remove="BhapticsVestBackend.cs" />
+    <Compile Remove="BhapticsSleeveBackend.cs" />
+    <Compile Remove="BhapticsFeetBackend.cs" />
+    <Compile Remove="BhapticsBackendFactory.cs" />
+    <Compile Remove="StaticBhapticsSdk.cs" />
+  </ItemGroup>
+
+</Project>

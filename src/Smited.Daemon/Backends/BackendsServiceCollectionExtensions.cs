@@ -29,6 +29,24 @@ internal static class BackendsServiceCollectionExtensions
             ServiceDescriptor.Singleton<IBackendFactory, MockPishockBackendFactory>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IBackendFactory, PishockBackendFactory>());
+
+        // One MockBhapticsBackendFactory instance per supported kind:
+        // BackendBootstrapper.ResolveFactory does FirstOrDefault on
+        // factory.Kind == descriptor.Kind, so each kind needs its own
+        // IBackendFactory. The factory itself is a thin dispatcher; the
+        // backends behind it are the MockBhapticsVest/Sleeve/Feet
+        // singletons registered in Program.cs.
+        //
+        // We use Add (not TryAddEnumerable) because the descriptor's
+        // ImplementationType is the same MockBhapticsBackendFactory
+        // class for every kind, and TryAddEnumerable would refuse the
+        // second through fifth registrations as duplicates. AddSmitedBackends
+        // is called once at startup so there's no idempotency concern.
+        foreach (var kind in MockBhapticsBackendFactory.SupportedKinds)
+        {
+            services.Add(
+                ServiceDescriptor.Singleton<IBackendFactory>(_ => new MockBhapticsBackendFactory(kind)));
+        }
         return services;
     }
 
@@ -170,4 +188,135 @@ internal static class BackendsServiceCollectionExtensions
             ServiceDescriptor.Singleton(typeof(IBackendFactory), factoryType));
         return services;
     }
+
+    /// <summary>
+    /// Reflectively loads the bHaptics backend's factory and SDK on
+    /// Windows hosts and registers one <see cref="IBackendFactory"/>
+    /// instance per supported kind. No-op on non-Windows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="AddOwoBackendIfWindows"/> for assembly load,
+    /// broad-catch diagnostics and atomic registration semantics —
+    /// including the <see cref="Assembly.LoadFrom(string)"/> path, because the
+    /// daemon's <c>ProjectReference</c> to <c>Smited.Daemon.Bhaptics</c>
+    /// uses <c>ReferenceOutputAssembly=false</c> for the same acyclic-
+    /// graph reason as OWO, which keeps the sibling DLL out of the
+    /// TPA list. Unlike OWO the bhaptics project hosts FIVE backend
+    /// kinds (vest, sleeve_l/r, feet_l/r) all routed through a single
+    /// <c>BhapticsBackendFactory</c> type parameterised by a
+    /// <c>kind</c> constructor argument: <c>BackendBootstrapper</c>
+    /// resolves factories by exact-match on <see cref="IBackendFactory.Kind"/>,
+    /// so each kind needs its own DI registration.
+    /// </para>
+    /// </remarks>
+    public static IServiceCollection AddBhapticsBackendIfWindows(this IServiceCollection services)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return services;
+        }
+
+        Type? factoryType;
+        Type? sdkType;
+        try
+        {
+            // Same Assembly.LoadFrom reasoning as AddOwoBackendIfWindows:
+            // ReferenceOutputAssembly=false on the daemon's ProjectReference
+            // to Smited.Daemon.Bhaptics keeps the sibling DLL out of
+            // .deps.json, so Type.GetType("...,Smited.Daemon.Bhaptics")
+            // returns null even with the DLL on disk. LoadFrom reads
+            // the file directly then resolves types from the module's
+            // metadata.
+            var bhapticsAssemblyPath = Path.Combine(AppContext.BaseDirectory, "Smited.Daemon.Bhaptics.dll");
+            var bhapticsAssembly = Assembly.LoadFrom(bhapticsAssemblyPath);
+
+            factoryType = bhapticsAssembly.GetType("Smited.Daemon.Bhaptics.BhapticsBackendFactory");
+            sdkType = bhapticsAssembly.GetType("Smited.Daemon.Bhaptics.StaticBhapticsSdk");
+        }
+        catch (Exception ex)
+        {
+            // Broad catch matches AddOwoBackendIfWindows. Any failure
+            // to resolve a bHaptics type means the assembly is unusable
+            // here — missing file (FileNotFoundException — expected on
+            // Windows hosts without bHaptics), wrong architecture,
+            // missing transitive (Bhaptics.Tact.dll), etc.
+            Console.Error.WriteLine(
+                $"warn: bHaptics assembly load failed ({ex.GetType().Name}). "
+                + "Daemon will continue without bHaptics support; verify the "
+                + "Smited.Daemon.Bhaptics assembly and Bhaptics.Tact runtime files "
+                + "are present and built for the current architecture. "
+                + $"Underlying error: {ex.Message}");
+            return services;
+        }
+
+        if (factoryType is null || sdkType is null)
+        {
+            // After a successful LoadFrom the both-null case means the
+            // DLL exists but contains neither type — a malformed
+            // assembly. The no-bhaptics-installed case took the
+            // FileNotFoundException branch above and never reaches here.
+            if (factoryType is not null && sdkType is null)
+            {
+                Console.Error.WriteLine(
+                    "warn: bHaptics factory type loaded but StaticBhapticsSdk did not. "
+                    + "This indicates a partial bHaptics assembly install. "
+                    + "Skipping bHaptics registration; daemon continues without "
+                    + "bHaptics support. Rebuild/republish to refresh the runtime files.");
+            }
+            else if (factoryType is null && sdkType is not null)
+            {
+                Console.Error.WriteLine(
+                    "warn: bHaptics StaticBhapticsSdk type loaded but BhapticsBackendFactory "
+                    + "did not. This indicates a partial bHaptics assembly install. "
+                    + "Skipping bHaptics registration.");
+            }
+            else
+            {
+                Console.Error.WriteLine(
+                    "warn: bHaptics assembly loaded but neither BhapticsBackendFactory "
+                    + "nor StaticBhapticsSdk could be resolved from it. The DLL "
+                    + "is malformed or stripped. Skipping bHaptics registration.");
+            }
+            return services;
+        }
+
+        services.AddSingleton(typeof(IBhapticsSdk), sdkType);
+
+        // Register one factory instance per kind. ActivatorUtilities
+        // resolves IBhapticsSdk / TimeProvider / ILoggerFactory from
+        // DI; the kind constant is passed positionally as the first
+        // constructor argument (matches BhapticsBackendFactory's ctor
+        // signature exactly).
+        //
+        // Add (not TryAddEnumerable) — same reasoning as in
+        // AddSmitedBackends for the mock equivalents: every kind uses
+        // the same BhapticsBackendFactory class, and TryAddEnumerable
+        // would refuse the duplicate ImplementationType. This extension
+        // is called once at startup so there's no idempotency concern.
+        foreach (var kind in BhapticsKinds)
+        {
+            services.Add(
+                ServiceDescriptor.Singleton<IBackendFactory>(sp =>
+                    (IBackendFactory)ActivatorUtilities.CreateInstance(sp, factoryType, kind)));
+        }
+        return services;
+    }
+
+    /// <summary>
+    /// The five real bHaptics kinds, in the same order
+    /// <c>BhapticsBackendFactory.SupportedKinds</c> exposes them.
+    /// Duplicated here so this extension does not need to reflect
+    /// the bhaptics assembly's static API just to enumerate the kind
+    /// constants; the two lists must stay in sync (covered by the
+    /// reflective-load test).
+    /// </summary>
+    private static readonly IReadOnlyList<string> BhapticsKinds = new[]
+    {
+        "bhaptics_vest",
+        "bhaptics_sleeve_l",
+        "bhaptics_sleeve_r",
+        "bhaptics_feet_l",
+        "bhaptics_feet_r",
+    };
 }

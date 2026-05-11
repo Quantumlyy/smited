@@ -95,6 +95,19 @@
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
       <Private>false</Private>
     </ProjectReference>
+    <ProjectReference Include="..\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj">
+      <!--
+        Same shape as the OWO reference above: keep bHaptics types out
+        of the daemon's compile graph and skip the TFM compatibility
+        check. The ResolveBhapticsBackendRuntime target below copies
+        the bhaptics assembly AND its Bhaptics.Tac runtime DLLs into
+        the daemon's bin folder so the reflective Type.GetType lookup
+        at startup finds them.
+      -->
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+      <Private>false</Private>
+    </ProjectReference>
   </ItemGroup>
 
   <!--
@@ -179,6 +192,59 @@
     </ItemGroup>
     <PropertyGroup>
       <_OwoBackendRuntimeResolved>true</_OwoBackendRuntimeResolved>
+    </PropertyGroup>
+  </Target>
+
+  <!--
+    Same shape and rationale as ResolveOwoBackendRuntime above, applied
+    to the bHaptics backend.
+
+    The Bhaptics.Tac NuGet (1.4.2) bundles its own websocket-sharp fork
+    internally (CustomWebSocketSharp.* types in Bhaptics.Tact.dll) and
+    does not bring transitive runtime DLLs — verified post-build by
+    listing `src/Smited.Daemon.Bhaptics/bin/.../win-x64/`. The only
+    files we carry are Smited.Daemon.Bhaptics.dll / .pdb and
+    Bhaptics.Tact.dll itself (note: package id ends in "Tac" but the
+    runtime assembly is "Bhaptics.Tact.dll" — long-standing bHaptics
+    packaging inconsistency).
+
+    Separate Content entries dodge the metadata-batching gotcha
+    documented on ResolveOwoBackendRuntime; do NOT collapse into a
+    semicolon-batched Include.
+  -->
+  <Target Name="ResolveBhapticsBackendRuntime"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(_TargetingWindows)' == 'true' and '$(_BhapticsBackendRuntimeResolved)' != 'true'">
+    <MSBuild Projects="..\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier)"
+             Targets="Build" />
+    <MSBuild Projects="..\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier)"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_BhapticsTargetPathItem" />
+    </MSBuild>
+    <PropertyGroup>
+      <_BhapticsBinDir>%(_BhapticsTargetPathItem.RootDir)%(_BhapticsTargetPathItem.Directory)</_BhapticsBinDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <Content Include="$(_BhapticsBinDir)Smited.Daemon.Bhaptics.dll">
+        <Link>Smited.Daemon.Bhaptics.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(_BhapticsBinDir)Smited.Daemon.Bhaptics.pdb">
+        <Link>Smited.Daemon.Bhaptics.pdb</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(_BhapticsBinDir)Bhaptics.Tact.dll">
+        <Link>Bhaptics.Tact.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+    </ItemGroup>
+    <PropertyGroup>
+      <_BhapticsBackendRuntimeResolved>true</_BhapticsBackendRuntimeResolved>
     </PropertyGroup>
   </Target>
 

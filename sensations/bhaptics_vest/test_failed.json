@@ -1,0 +1,31 @@
+{
+  "name": "test_failed",
+  "backend_kind": "bhaptics_vest",
+  "display_name": "Test Failed",
+  "description": "Two firm pulses on the abdomen — a test went red.",
+  "tags": ["build", "test", "failure"],
+  "default_zone_ids": ["abdominal_l", "abdominal_r"],
+  "default_intensity": 65,
+  "estimated_duration": "0.58s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 65 },
+          "duration": { "duration": "0.18s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.04s" }
+        }
+      },
+      {
+        "parameters": {
+          "intensity": { "number": 65 },
+          "duration": { "duration": "0.18s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.04s" },
+          "exit_delay": { "duration": "0.1s" }
+        }
+      }
+    ]
+  }
+}

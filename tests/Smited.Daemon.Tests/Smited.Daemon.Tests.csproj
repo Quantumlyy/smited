@@ -54,6 +54,7 @@
   -->
   <ItemGroup Condition="'$(_TargetingWindows)' == 'true'">
     <ProjectReference Include="..\..\src\Smited.Daemon.Owo\Smited.Daemon.Owo.csproj" />
+    <ProjectReference Include="..\..\src\Smited.Daemon.Bhaptics\Smited.Daemon.Bhaptics.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(_TargetingWindows)' != 'true'">
@@ -65,6 +66,10 @@
     <Compile Remove="Backends\OwoBackendTests.cs" />
     <Compile Remove="Backends\OwoMuscleMapTests.cs" />
     <Compile Remove="Backends\StaticOwoSdkConfigureTests.cs" />
+    <Compile Remove="Backends\BhapticsVestBackendTests.cs" />
+    <Compile Remove="Backends\BhapticsSleeveBackendTests.cs" />
+    <Compile Remove="Backends\BhapticsFeetBackendTests.cs" />
+    <Compile Remove="Backends\BhapticsBackendFactoryTests.cs" />
   </ItemGroup>
 
 </Project>
