@@ -1,0 +1,22 @@
+{
+  "name": "chat_zap",
+  "backend_kind": "bhaptics_sleeve_l",
+  "display_name": "Chat Zap",
+  "description": "Sharp zap on the left arm — high-priority mention.",
+  "tags": ["chat", "mention", "priority"],
+  "default_zone_ids": ["arm_l"],
+  "default_intensity": 60,
+  "estimated_duration": "0.23s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 60 },
+          "duration": { "duration": "0.18s" },
+          "ramp_up": { "duration": "0.01s" },
+          "ramp_down": { "duration": "0.04s" }
+        }
+      }
+    ]
+  }
+}

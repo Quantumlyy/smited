@@ -177,6 +177,21 @@ internal sealed class DaemonFixture : IDisposable
     /// <summary>The mock backend's controller surface.</summary>
     public IMockOwoController MockController => _factory.Services.GetRequiredService<IMockOwoController>();
 
+    /// <summary>Mock bHaptics vest backend controller (no side — there's
+    /// only one).</summary>
+    public IMockBhapticsController MockBhapticsVest =>
+        _factory.Services.GetRequiredService<MockBhapticsVestBackend>();
+
+    /// <summary>Mock bHaptics sleeve backend controller for the given
+    /// side (<c>"left"</c> or <c>"right"</c>).</summary>
+    public IMockBhapticsController MockBhapticsSleeve(string side) =>
+        _factory.Services.GetRequiredKeyedService<MockBhapticsSleeveBackend>(side);
+
+    /// <summary>Mock bHaptics feet backend controller for the given
+    /// side (<c>"left"</c> or <c>"right"</c>).</summary>
+    public IMockBhapticsController MockBhapticsFeet(string side) =>
+        _factory.Services.GetRequiredKeyedService<MockBhapticsFeetBackend>(side);
+
     /// <summary>
     /// Bodymap state populated by <c>BackendBootstrapper</c> after the
     /// validator runs. Exposes <see cref="IBodyMapState.RefusedBackendCount"/>

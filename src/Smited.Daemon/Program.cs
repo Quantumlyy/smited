@@ -36,6 +36,12 @@ builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configurati
 
 builder.Services.Configure<SmitedOptions>(builder.Configuration.GetSection("Smited"));
 
+// Daemon-wide bHaptics settings. Distinct from per-backend options
+// (BhapticsVestOptions etc.) because the bHaptics SDK is a process-wide
+// singleton and its identity is decided once at first InitializeAsync —
+// see BhapticsGlobalOptions remarks.
+builder.Services.Configure<BhapticsGlobalOptions>(builder.Configuration.GetSection("Smited:Bhaptics"));
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<IBackendEventSink>(sp => sp.GetRequiredService<EventBus>());
@@ -52,6 +58,20 @@ builder.Services.AddSingleton<DaemonStartTime>();
 builder.Services.AddSingleton<MockOwoBackend>();
 builder.Services.AddSingleton<IMockOwoController>(sp => sp.GetRequiredService<MockOwoBackend>());
 
+// Mock bHaptics backends. Vest is a plain singleton; sleeve and feet
+// are keyed by "left"/"right" so the factory can resolve the correct
+// instance per descriptor kind. Tests resolve concrete types directly
+// from DI (BhapticsE2ETests / DaemonFixture do this).
+builder.Services.AddSingleton<MockBhapticsVestBackend>();
+builder.Services.AddKeyedSingleton<MockBhapticsSleeveBackend>("left",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsSleeveBackend>(sp, "left"));
+builder.Services.AddKeyedSingleton<MockBhapticsSleeveBackend>("right",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsSleeveBackend>(sp, "right"));
+builder.Services.AddKeyedSingleton<MockBhapticsFeetBackend>("left",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsFeetBackend>(sp, "left"));
+builder.Services.AddKeyedSingleton<MockBhapticsFeetBackend>("right",
+    (sp, _) => ActivatorUtilities.CreateInstance<MockBhapticsFeetBackend>(sp, "right"));
+
 builder.Services.AddSingleton<BodyMapValidator>();
 builder.Services.AddSingleton<BodyMapState>();
 builder.Services.AddSingleton<IBodyMapState>(sp => sp.GetRequiredService<BodyMapState>());
@@ -66,6 +86,12 @@ builder.Services.AddSmitedBackends();
 // the legacy SmitedOptions.Backends.Owo singleton registration is
 // no longer needed.
 builder.Services.AddOwoBackendIfWindows();
+
+// Same shape for bHaptics: one factory class instance per supported
+// kind (vest, sleeve_l/r, feet_l/r) gets registered on Windows hosts;
+// all five share a single StaticBhapticsSdk singleton because the
+// bHaptics Player is a per-host process owning every paired device.
+builder.Services.AddBhapticsBackendIfWindows();
 
 // History database (daemon-internal SQLite). Registered first so the
 // schema is ready and the EventBus subscriber is attached BEFORE

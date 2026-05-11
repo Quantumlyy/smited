@@ -1,0 +1,22 @@
+{
+  "name": "chat_tap",
+  "backend_kind": "bhaptics_sleeve_l",
+  "display_name": "Chat Tap",
+  "description": "Soft single tap on the left arm — someone @-mentioned you.",
+  "tags": ["chat", "mention", "light"],
+  "default_zone_ids": ["arm_l"],
+  "default_intensity": 45,
+  "estimated_duration": "0.15s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 45 },
+          "duration": { "duration": "0.1s" },
+          "ramp_up": { "duration": "0.02s" },
+          "ramp_down": { "duration": "0.03s" }
+        }
+      }
+    ]
+  }
+}

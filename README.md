@@ -1,6 +1,6 @@
 # smited
 
-A daemon that fronts haptic hardware behind a single gRPC interface. Backends register at runtime and advertise their own zones, parameter schemas, concurrency models, and calibration state, so clients discover capabilities and dispatch accordingly without hardcoding hardware-specific knowledge. The first real backend is the OWO Skin haptic vest; this MVP ships with a faithful `MockOwoBackend` so the gRPC surface, event streaming, and concurrency model can be exercised on Mac without hardware. Backend enablement is descriptor-driven (`Smited:Backends:Items[]`), and a daemon-internal bodymap framework knows where each backend's zones sit on the user's body and refuses placements in manufacturer-mandated or smited-default forbidden regions.
+A daemon that fronts haptic hardware behind a single gRPC interface. Backends register at runtime and advertise their own zones, parameter schemas, concurrency models, and calibration state, so clients discover capabilities and dispatch accordingly without hardcoding hardware-specific knowledge. Real backends today: OWO Skin (Windows, TENS vest), and the bHaptics family — TactSuit X40 vest plus per-arm TactSleeve and per-foot Tactosy (Windows, vibrotactile). This MVP ships with mock backends for each kind so the gRPC surface, event streaming, and concurrency model can be exercised on Mac without hardware. Backend enablement is descriptor-driven (`Smited:Backends:Items[]`), and a daemon-internal bodymap framework knows where each backend's zones sit on the user's body and refuses placements in manufacturer-mandated or smited-default forbidden regions.
 
 ## Quickstart (macOS / Linux)
 
@@ -63,13 +63,14 @@ See [`docs/building.md`](docs/building.md) for the full Cake target list.
 - [`docs/adding-a-backend.md`](docs/adding-a-backend.md) — how to add a new `IHapticBackend` implementation, including the descriptor + factory pattern.
 - [`docs/body-map.md`](docs/body-map.md) — bodymap framework, region taxonomy, and forbidden-region semantics.
 - [`docs/owo.md`](docs/owo.md) — Windows OWO Skin setup, calibration, smoke-test runbook, TENS safety notes.
+- [`docs/bhaptics.md`](docs/bhaptics.md) — Windows bHaptics setup (TactSuit, TactSleeve, Tactosy for Feet), smoke-test runbook, vibrotactile safety notes.
 - [`docs/history.md`](docs/history.md) — the daemon's SQLite history database: tables, queries, retention.
 - [`docs/admin.md`](docs/admin.md) — the in-process Blazor Server admin UI on port 7779 (smoke-test surface).
 - [`sensations/README.md`](sensations/README.md) — sensation file format reference.
 
 ## Status
 
-This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. The Windows OWO Skin backend in `src/Smited.Daemon.Owo/` is wired against the official OWO C# SDK — for development, the canonical target is the **OWO Visualizer** (downloadable from `owogame.com/developers/`); the MyOWO consumer app is the production path and requires a registered project ID + `.owoauth` from `devs@owogame.com`. See [`docs/owo.md`](docs/owo.md) for setup, the smoke-test runbook, and TENS safety notes. The daemon is LAN/localhost only — no TLS, no auth.
+This MVP covers capability discovery, sensation triggering, the four concurrency policies (REJECT_NEW, CANCEL_OLDEST, PRIORITY, QUEUE), event streaming, the `/panic` endpoint, the boot-time sensation library, descriptor-driven backend enablement (`Smited:Backends:Items[]` dispatched through `IBackendFactory`), and a daemon-internal bodymap framework with manufacturer-mandated and smited-default forbidden-region enforcement. The Windows OWO Skin backend in `src/Smited.Daemon.Owo/` is wired against the official OWO C# SDK — for development, the canonical target is the **OWO Visualizer** (downloadable from `owogame.com/developers/`); the MyOWO consumer app is the production path and requires a registered project ID + `.owoauth` from `devs@owogame.com`. See [`docs/owo.md`](docs/owo.md) for setup, the smoke-test runbook, and TENS safety notes. The Windows bHaptics backend family in `src/Smited.Daemon.Bhaptics/` wraps the `Bhaptics.Tac` SDK1 NuGet for the TactSuit, TactSleeve, and Tactosy for Feet — see [`docs/bhaptics.md`](docs/bhaptics.md). The daemon is LAN/localhost only — no TLS, no auth.
 
 ## License
 
