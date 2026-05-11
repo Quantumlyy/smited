@@ -174,14 +174,14 @@ internal static class ArgParser
         {
             return new ArgParseResult.Failure("--mode is required (cloud or lan).");
         }
-        if (!System.Enum.TryParse<PishockTransportMode>(modeStr, ignoreCase: true, out var mode))
+        if (!TryParseEnumName<PishockTransportMode>(modeStr, out var mode))
         {
             return new ArgParseResult.Failure(
                 $"--mode must be 'cloud' or 'lan', got '{modeStr}'.");
         }
 
         var opStr = ReadOpt(args, "--op") ?? "vibrate";
-        if (!System.Enum.TryParse<PishockOp>(opStr, ignoreCase: true, out var op))
+        if (!TryParseEnumName<PishockOp>(opStr, out var op))
         {
             return new ArgParseResult.Failure(
                 $"--op must be 'vibrate', 'beep', or 'shock', got '{opStr}'.");
@@ -297,5 +297,31 @@ internal static class ArgParser
     {
         public sealed record Success(int Value) : ParseIntResult;
         public sealed record Failure(string Message) : ParseIntResult;
+    }
+
+    /// <summary>
+    /// Like <see cref="System.Enum.TryParse{T}(string, bool, out T)"/>
+    /// but rejects numeric inputs. <c>Enum.TryParse</c> happily turns
+    /// <c>"0"</c> into the first enum member (e.g. <c>PishockOp.Shock</c>),
+    /// which would let <c>--op 0</c> silently fire a real shock when
+    /// the CLI advertises only name-based values. Match against
+    /// <see cref="System.Enum.GetNames{T}"/> first.
+    /// </summary>
+    private static bool TryParseEnumName<T>(string raw, out T value) where T : struct, System.Enum
+    {
+        value = default;
+        if (string.IsNullOrEmpty(raw))
+        {
+            return false;
+        }
+        foreach (var name in System.Enum.GetNames<T>())
+        {
+            if (string.Equals(name, raw, StringComparison.OrdinalIgnoreCase))
+            {
+                value = System.Enum.Parse<T>(name);
+                return true;
+            }
+        }
+        return false;
     }
 }
