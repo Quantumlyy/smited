@@ -17,7 +17,10 @@ namespace Smited.Daemon.Pishock.Internal;
 internal static class PishockTriggerValidator
 {
     public static void ValidateMicrosensation(
-        int index, MicrosensationParameters micro, PishockBackendOptions options)
+        int index,
+        MicrosensationParameters micro,
+        uint? intensityScale,
+        PishockBackendOptions options)
     {
         ArgumentNullException.ThrowIfNull(micro);
         ArgumentNullException.ThrowIfNull(options);
@@ -33,7 +36,15 @@ internal static class PishockTriggerValidator
                 $"microsensations[{index}].parameters.op");
         }
 
-        var intensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
+        var authoredIntensity = (int)MicrosensationReader.ReadNumber(micro, "intensity");
+        // Compare the EFFECTIVE intensity (after IntensityScale is
+        // applied) to the per-op cap. Playback sends the scaled value
+        // to the device, not the authored one — checking authored
+        // against the cap would paradoxically tighten the configured
+        // ceiling, rejecting triggers like authored=60 + scale=50
+        // against cap=50 even though the wire fires at 30.
+        var effectiveIntensity = MicrosensationReader.ApplyIntensityScale(
+            authoredIntensity, intensityScale);
         var cap = op switch
         {
             PishockOp.Shock => options.MaxIntensityShock,
@@ -44,11 +55,14 @@ internal static class PishockTriggerValidator
             PishockOp.Beep => 100,
             _ => 0,
         };
-        if (intensity > cap)
+        if (effectiveIntensity > cap)
         {
+            var detail = effectiveIntensity == authoredIntensity
+                ? $"{authoredIntensity}"
+                : $"{authoredIntensity} (effective {effectiveIntensity} after IntensityScale)";
             throw new BackendTriggerRejectedException(
                 TriggerErrorCode.InvalidParameter,
-                $"intensity {intensity} exceeds {op} cap of {cap}",
+                $"intensity {detail} exceeds {op} cap of {cap}",
                 $"microsensations[{index}].parameters.intensity");
         }
 

@@ -231,6 +231,84 @@ public class PishockBackendTests
     }
 
     [Fact]
+    public async Task TriggerAsync_authored_above_cap_but_scaled_below_cap_is_accepted()
+    {
+        // Playback sends the SCALED intensity to the device, not the
+        // authored value. Comparing authored-only to the cap rejects
+        // triggers that would land within the safety ceiling at the
+        // wire — e.g. authored 60 with IntensityScale:50 against a
+        // MaxIntensityVibrate:50 cap fires at 30%, which is well
+        // inside the configured ceiling. The validator must use the
+        // effective (post-scale) value or the cap is paradoxically
+        // tightened beyond what the user configured.
+        var (backend, client, time) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            MaxIntensityVibrate = 50,
+        });
+        await using var __ = backend;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["op"] = new ParameterValue.EnumValue(PishockOp.Vibrate.ToString()),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(100)),
+            ["intensity"] = new ParameterValue.Number(60),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "scaled-below-cap",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: 50,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        await backend.TriggerAsync(request, CancellationToken.None);
+        await PumpUntil(() => client.Calls.Count >= 1, time, TimeSpan.FromSeconds(2));
+
+        client.Calls.Should().HaveCount(1);
+        client.Calls[0].Intensity.Should().Be(30, "60 * 50 / 100 = 30, within MaxIntensityVibrate=50");
+    }
+
+    [Fact]
+    public async Task TriggerAsync_authored_and_scaled_both_above_cap_still_rejects()
+    {
+        // The cap is enforced against the effective value, but only the
+        // effective value — authored 60, scale 100, cap 50 still
+        // rejects because effective is also 60. This locks in that
+        // the fix doesn't accidentally weaken the cap when no
+        // IntensityScale is applied.
+        var (backend, _, _) = NewBackend(new PishockBackendOptions
+        {
+            Mode = PishockTransportMode.Lan,
+            DeviceIp = "192.168.1.50",
+            MaxIntensityVibrate = 50,
+        });
+        await using var __ = backend;
+
+        var values = new Dictionary<string, ParameterValue>
+        {
+            ["op"] = new ParameterValue.EnumValue(PishockOp.Vibrate.ToString()),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(100)),
+            ["intensity"] = new ParameterValue.Number(60),
+        };
+        var request = new BackendTriggerRequest(
+            SensationId: "scaled-above-cap",
+            SensationName: "test",
+            ZoneIds: new[] { "shock" },
+            IntensityScale: 100,
+            Priority: 0,
+            ClientTraceId: "trace",
+            Microsensations: new[] { new MicrosensationParameters(values) });
+
+        var act = async () => await backend.TriggerAsync(request, CancellationToken.None);
+        var ex = await act.Should().ThrowAsync<BackendTriggerRejectedException>();
+        ex.Which.Code.Should().Be(TriggerErrorCode.InvalidParameter);
+        ex.Which.Field.Should().Contain("intensity");
+    }
+
+    [Fact]
     public async Task TriggerAsync_with_no_IntensityScale_passes_authored_intensity_unchanged()
     {
         var (backend, client, time) = NewBackend(new PishockBackendOptions

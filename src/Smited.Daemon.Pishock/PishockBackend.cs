@@ -114,7 +114,8 @@ public sealed class PishockBackend : IHapticBackend
 
         for (var i = 0; i < request.Microsensations.Count; i++)
         {
-            PishockTriggerValidator.ValidateMicrosensation(i, request.Microsensations[i], _options);
+            PishockTriggerValidator.ValidateMicrosensation(
+                i, request.Microsensations[i], request.IntensityScale, _options);
         }
 
         // Pre-allocate one token per FIREABLE microsensation atomically.
