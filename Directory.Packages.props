@@ -55,6 +55,14 @@
 
     <!-- OWO Skin SDK — Windows-only; restored only by Smited.Daemon.Owo. -->
     <PackageVersion Include="OWO" Version="2.4.2" />
+
+    <!--
+      bHaptics Tac SDK1 — Windows-only; restored only by
+      Smited.Daemon.Bhaptics. SDK1 (Bhaptics.Tac) is sufficient for
+      smited's motor-array submission needs and does not require
+      Developer Portal registration the way SDK2 does.
+    -->
+    <PackageVersion Include="Bhaptics.Tac" Version="1.4.2" />
   </ItemGroup>
 
 </Project>
