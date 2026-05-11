@@ -53,6 +53,19 @@ public interface IHapticBackend : IAsyncDisposable
     Task<int> StopAsync(BackendStopRequest request, CancellationToken ct);
 
     /// <summary>
+    /// Returns a short, low-intensity microsensation suitable for the
+    /// admin body map's click-to-fire diagnostic. Parameter names are
+    /// not standardized across backends (OWO has <c>frequency</c>;
+    /// bHaptics doesn't; PiShock uses an <c>op</c> enum), so each
+    /// backend supplies its own values that pass its own
+    /// <see cref="Parameters"/> schema. Expected to be ~0.3s at
+    /// ~50–60% intensity — noticeable but not startling, lets the
+    /// operator identify which zone fired without playing back a full
+    /// authored sensation.
+    /// </summary>
+    MicrosensationParameters BuildDiagnosticMicrosensation();
+
+    /// <summary>
     /// Cold stream of lifecycle events (sensation started/completed/cancelled,
     /// status changes, calibration changes). The <c>EventBus</c> subscribes
     /// to this on backend registration and re-publishes for daemon-wide fan-out.

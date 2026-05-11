@@ -136,6 +136,13 @@ public abstract class MockBhapticsBackendBase : IHapticBackend, IMockBhapticsCon
 
     public IReadOnlyCollection<string> ActiveSensationIds => _playbacks.Keys.ToArray();
 
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        new(new Dictionary<string, ParameterValue>
+        {
+            ["intensity"] = new ParameterValue.Number(60),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
+        });
+
     public IReadOnlyList<MockBhapticsSubmission> RecentSubmissions
     {
         get

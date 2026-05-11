@@ -132,6 +132,17 @@ public sealed class MockOwoBackend : IHapticBackend, IMockOwoController
 
     public IReadOnlyCollection<string> ActiveSensationIds => _playbacks.Keys.ToArray();
 
+    /// <inheritdoc />
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        new(new Dictionary<string, ParameterValue>
+        {
+            ["frequency"] = new ParameterValue.Number(60),
+            ["intensity"] = new ParameterValue.Number(60),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
+            ["ramp_up"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(30)),
+            ["ramp_down"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(30)),
+        });
+
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
     public Task<BackendTriggerResult> TriggerAsync(BackendTriggerRequest request, CancellationToken ct)

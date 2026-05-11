@@ -206,6 +206,14 @@ public abstract class BhapticsBackendBase : IHapticBackend
     public IAsyncEnumerable<BackendEvent> Events => _events.Reader.ReadAllAsync();
 
     /// <inheritdoc />
+    public MicrosensationParameters BuildDiagnosticMicrosensation() =>
+        new(new Dictionary<string, ParameterValue>
+        {
+            ["intensity"] = new ParameterValue.Number(60),
+            ["duration"] = new ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
+        });
+
+    /// <inheritdoc />
     public async Task ConnectAsync(CancellationToken ct)
     {
         Status = BackendStatus.Disconnected;

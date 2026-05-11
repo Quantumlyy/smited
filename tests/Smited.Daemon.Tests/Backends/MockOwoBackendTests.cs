@@ -134,6 +134,21 @@ public class MockOwoBackendTests
     }
 
     [Fact]
+    public void BuildDiagnosticMicrosensation_satisfies_every_required_parameter()
+    {
+        var backend = NewBackend(out _);
+        var diag = backend.BuildDiagnosticMicrosensation();
+
+        var required = backend.Parameters.Parameters.Where(p => p.Required).Select(p => p.Name);
+        diag.Values.Keys.Should().Contain(required,
+            "the diagnostic must carry every required parameter or the trigger validator will reject the click-to-fire");
+
+        // OWO uses frequency (EMS carrier); explicit assertion that it is
+        // present catches the "diagnostic accidentally shares bHaptics' shape" bug.
+        diag.Values.Should().ContainKey("frequency");
+    }
+
+    [Fact]
     public async Task SensationStarted_event_carries_request_zones_and_intensity()
     {
         var backend = NewBackend(out _);

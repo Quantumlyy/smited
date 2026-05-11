@@ -53,6 +53,19 @@ public class MockBhapticsBackendTests
     }
 
     [Fact]
+    public void BuildDiagnosticMicrosensation_satisfies_every_required_parameter_and_omits_frequency()
+    {
+        var backend = NewVest();
+        var diag = backend.BuildDiagnosticMicrosensation();
+
+        var required = backend.Parameters.Parameters.Where(p => p.Required).Select(p => p.Name);
+        diag.Values.Keys.Should().Contain(required);
+
+        diag.Values.Should().NotContainKey("frequency",
+            "bHaptics is vibrotactile and its schema does not declare a frequency parameter");
+    }
+
+    [Fact]
     public async Task TriggerAsync_captures_motor_payload_for_pectoral_zone()
     {
         var backend = NewVest();
