@@ -109,17 +109,13 @@ public sealed class MockPishockBackend : IHapticBackend
 
     /// <inheritdoc />
     /// <remarks>
-    /// Always vibrate, never shock. See <see cref="PishockBackend"/>'s
-    /// override for the rationale. Mirrored here so smoke tests have
-    /// parity with the real backend.
+    /// Mirrors <see cref="PishockBackend.BuildDiagnosticMicrosensation"/>
+    /// so smoke tests against the mock produce the same op/intensity/
+    /// duration the real backend would dispatch under the same
+    /// <see cref="PishockBackendOptions"/>.
     /// </remarks>
     public MicrosensationParameters BuildDiagnosticMicrosensation() =>
-        new(new Dictionary<string, Backends.Internal.ParameterValue>
-        {
-            ["op"] = new Backends.Internal.ParameterValue.EnumValue("vibrate"),
-            ["intensity"] = new Backends.Internal.ParameterValue.Number(60),
-            ["duration"] = new Backends.Internal.ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
-        });
+        PishockDescriptors.BuildDiagnosticMicrosensation(_options);
 
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 

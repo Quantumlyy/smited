@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Smited.Daemon.Backends.Internal;
 using Smited.Daemon.BodyMap;
 using Smited.V1;
 
@@ -123,5 +124,60 @@ internal static class PishockDescriptors
         });
 
         return schema;
+    }
+
+    /// <summary>
+    /// Builds a diagnostic microsensation for the admin body map's
+    /// click-to-fire on a PiShock descriptor configured with these
+    /// <paramref name="options"/>. Adapts to per-descriptor
+    /// <see cref="PishockBackendOptions.AllowedOps"/>, per-op intensity
+    /// caps, and <see cref="PishockBackendOptions.MaxDurationMs"/> so
+    /// the diagnostic doesn't reject in
+    /// <see cref="PishockTriggerValidator"/> on legitimate non-default
+    /// configurations (e.g. a Beep-only descriptor, or
+    /// <c>MaxIntensityVibrate</c> capped below the daemon's default 60).
+    /// </summary>
+    /// <remarks>
+    /// Op selection prefers <c>Vibrate</c> (best haptic for zone
+    /// identification), then <c>Beep</c> (audible confirmation, no
+    /// haptic), then <c>Shock</c> (only when nothing else is allowed —
+    /// the click-to-fire is a zone diagnostic, not a stress test).
+    /// Intensity targets 60 and clamps to the per-op cap.
+    /// Duration targets 300 ms and clamps to <c>MaxDurationMs</c>; on
+    /// cloud transports an authored 300 ms rounds up to 1 s on the wire,
+    /// and the validator's effective-duration check uses that rounded
+    /// value when comparing against the cap — so a very low
+    /// <c>MaxDurationMs</c> on cloud may still reject. That's a
+    /// legitimately broken config and the rejection toast is the
+    /// correct surface for it.
+    /// </remarks>
+    public static MicrosensationParameters BuildDiagnosticMicrosensation(PishockBackendOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var allowed = options.EffectiveAllowedOps;
+        PishockOp op;
+        if (allowed.Contains(PishockOp.Vibrate)) op = PishockOp.Vibrate;
+        else if (allowed.Contains(PishockOp.Beep)) op = PishockOp.Beep;
+        else op = PishockOp.Shock; // last resort — AllowedOps is required non-empty by the factory
+
+        var cap = op switch
+        {
+            PishockOp.Shock => options.MaxIntensityShock,
+            PishockOp.Vibrate => options.MaxIntensityVibrate,
+            PishockOp.Beep => 100,
+            _ => 0,
+        };
+        var intensity = Math.Clamp(60, 0, Math.Max(0, cap));
+
+        var duration = TimeSpan.FromMilliseconds(
+            Math.Min(300, Math.Max(0, options.MaxDurationMs)));
+
+        return new MicrosensationParameters(new Dictionary<string, Backends.Internal.ParameterValue>
+        {
+            ["op"] = new Backends.Internal.ParameterValue.EnumValue(op.ToString().ToLowerInvariant()),
+            ["intensity"] = new Backends.Internal.ParameterValue.Number(intensity),
+            ["duration"] = new Backends.Internal.ParameterValue.Duration(duration),
+        });
     }
 }

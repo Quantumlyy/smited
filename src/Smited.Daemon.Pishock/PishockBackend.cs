@@ -107,19 +107,17 @@ public sealed class PishockBackend : IHapticBackend
 
     /// <inheritdoc />
     /// <remarks>
-    /// Always vibrate, never shock. The body map click-to-fire is a
-    /// diagnostic for *zone identification*, not a stress test, and a
-    /// 60%-intensity shock dispatched on a click is the wrong default.
-    /// Operators who want to test shock op coverage should fire a
-    /// shock-authored sensation through the sensation tester.
+    /// Vibrate by preference, never shock. The click-to-fire is a
+    /// zone-identification diagnostic, not a stress test. The
+    /// concrete parameters come from
+    /// <see cref="PishockDescriptors.BuildDiagnosticMicrosensation"/>
+    /// so the diagnostic adapts to per-descriptor AllowedOps,
+    /// MaxIntensityVibrate, and MaxDurationMs — without that the
+    /// hardcoded vibrate@60 always rejected on Beep-only or
+    /// MaxIntensityVibrate&lt;60 configurations.
     /// </remarks>
     public MicrosensationParameters BuildDiagnosticMicrosensation() =>
-        new(new Dictionary<string, Backends.Internal.ParameterValue>
-        {
-            ["op"] = new Backends.Internal.ParameterValue.EnumValue("vibrate"),
-            ["intensity"] = new Backends.Internal.ParameterValue.Number(60),
-            ["duration"] = new Backends.Internal.ParameterValue.Duration(TimeSpan.FromMilliseconds(300)),
-        });
+        PishockDescriptors.BuildDiagnosticMicrosensation(_options);
 
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
