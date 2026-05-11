@@ -187,7 +187,7 @@ Single-pulse sensation:
   "backend_kind": "pishock",
   "display_name": "Compile Error (Mild)",
   "default_zone_ids": ["shock"],
-  "default_intensity": 30,
+  "default_intensity": 100,
   "estimated_duration": "0.5s",
   "definition": {
     "microsensations": [
@@ -211,7 +211,7 @@ Multi-pulse sensation:
   "backend_kind": "pishock",
   "display_name": "Deploy Success",
   "default_zone_ids": ["shock"],
-  "default_intensity": 50,
+  "default_intensity": 100,
   "estimated_duration": "0.7s",
   "definition": {
     "microsensations": [
@@ -222,6 +222,16 @@ Multi-pulse sensation:
   }
 }
 ```
+
+Note `default_intensity: 100` rather than echoing the authored
+microsensation intensity. The coordinator applies `default_intensity`
+as `IntensityScale` when a trigger doesn't override it, and the
+PiShock backend multiplies authored intensity by that scale —
+setting both to the same non-100 value silently double-scales (a
+file with `default_intensity: 30` and authored `intensity: 30` fires
+at `30 * 30 / 100 = 9%`, not 30%). The bundled PiShock library uses
+this convention; OWO files differ because the OWO backend doesn't
+apply `IntensityScale`.
 
 `estimated_duration` is the sum of every microsensation's
 `delay_before + duration`. For the example above:

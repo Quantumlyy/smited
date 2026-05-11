@@ -121,24 +121,44 @@ grpcurl -plaintext -d '{"backend_id":"pishock-left-thigh"}' \
 
 ## 4. Fire each bundled sensation
 
+For the vibrate-only sensations, use the LAN descriptor
+(`pishock-right-calf` in the sample config) — LAN preserves
+millisecond timing, while Cloud rounds positive durations up to
+whole seconds (the cloud API's minimum). Firing
+`compile_error_mild` (authored 500ms) via Cloud fires for 1s on
+the device; via LAN it fires for 500ms as authored.
+
 ```sh
 grpcurl -plaintext -d '{
-    "backend_id":"pishock-left-thigh",
+    "backend_id":"pishock-right-calf",
     "sensation_name":"compile_error_mild"
 }' localhost:7777 smited.v1.SmitedService/Trigger
-# Expected: accepted=true. Brief 500ms vibrate on the left thigh.
+# Expected: accepted=true. Brief 500ms vibrate on the right calf.
 ```
 
-Iterate the rest:
+Sub-second vibrate-only set, fired on the LAN descriptor:
 
-| Sensation              | Expected feel                                  |
+| Sensation              | Expected feel (LAN, ms-accurate)               |
 | ---------------------- | ---------------------------------------------- |
-| `compile_error_mild`   | Brief 500ms vibrate at 30%                     |
-| `compile_error_severe` | Sustained 1s vibrate at 60%                    |
-| `deploy_success`       | Three short vibrates with 200ms gaps           |
-| `deploy_failure`       | One firm 800ms vibrate at 70%                  |
-| `pr_merged`            | Soft vibrate then a confirmation beep          |
-| `notification`         | 100ms beep                                     |
+| `compile_error_mild`   | 500ms vibrate at 30%                           |
+| `compile_error_severe` | 1s vibrate at 60%                              |
+| `deploy_success`       | Three 100ms vibrates with 200ms gaps           |
+| `deploy_failure`       | 800ms vibrate at 70%                           |
+
+The two beep-containing sensations need a descriptor whose
+`AllowedOps` includes `Beep` — the sample's `pishock-right-calf`
+has `AllowedOps: ["Vibrate"]` only and rejects them at trigger
+time (verified in § 6). Fire these against `pishock-left-thigh`
+(Cloud in the sample), which has Beep allowed:
+
+| Sensation       | Backend            | Authored timing               | Wire reality                          |
+| --------------- | ------------------ | ----------------------------- | ------------------------------------- |
+| `pr_merged`     | `pishock-left-thigh` | 200ms vibrate + 100ms beep   | Cloud rounds both pulses up to 1s     |
+| `notification`  | `pishock-left-thigh` | 100ms beep                    | Cloud rounds to 1s                    |
+
+If your config maps a LAN descriptor with Beep allowed, prefer
+that for ms-accurate beep timing; the cloud-rounded behavior is
+the API's limitation, not a daemon bug.
 
 ## 5. Verify single-channel concurrency
 
