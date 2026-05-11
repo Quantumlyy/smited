@@ -104,18 +104,22 @@ switch. The bundled sensation library (`sensations/pishock/`) ships
 **no Shock entries**; users author their own once they've enabled
 Shock in `AllowedOps`.
 
-Triggers requesting a disallowed op fail two ways:
+`AllowedOps` enforcement runs **at trigger time**, not at sensation
+load. The backend's `ParameterSchema` always advertises every PiShock
+op (`vibrate`, `beep`, `shock`) so kind-scoped sensation files —
+which validate against every backend of the pishock kind at boot —
+load successfully regardless of any single descriptor's
+`AllowedOps`. Without this, a user with one vibrate-only descriptor
+and one shock-enabled descriptor would have the loader refuse
+bundled Beep-using sensations against the vibrate-only entry and
+abort startup.
 
-1. **At sensation-load time:** The sensation file's `op` parameter
-   declares an enum value. The backend's `ParameterSchema` lists only
-   the allowed enum values for this descriptor's `AllowedOps`, so a
-   sensation file with `op=Shock` against a vibrate-only descriptor
-   gets rejected at startup by `SensationValidator` with a structured
-   `INVALID_PARAMETER`.
-2. **At trigger time:** Inline (non-library) triggers via
-   `inline_microsensations` bypass the schema-binding sensation
-   loader. The backend's runtime validator catches these and rejects
-   with the same `INVALID_PARAMETER` code.
+When a trigger requests an op outside the target descriptor's
+`AllowedOps`, `PishockTriggerValidator` rejects it with a structured
+`TRIGGER_ERROR_CODE_INVALID_PARAMETER` whose `field` is
+`microsensations[N].parameters.op`. This applies uniformly to both
+library-scoped triggers (`sensation_name`) and inline triggers
+(`inline.microsensations`).
 
 ## Rate limiter
 
