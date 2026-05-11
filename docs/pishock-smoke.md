@@ -28,7 +28,9 @@ The PiShock account UI generates the API key and per-shocker share
 codes; both live under "Account" → "Edit" and per-shocker entries
 respectively.
 
-Expected output:
+Expected output (the API returns one of two accepted bodies
+depending on firmware / configuration; both are treated as
+success by `CloudPishockClient` and the smoke tool exits 0):
 
 ```
 Sending Vibrate for 200ms at 20% via Cloud...
@@ -36,8 +38,15 @@ Accepted:    True
 Raw body:    Operation Succeeded.
 ```
 
-The device should fire a brief light vibration. If the response is
-anything other than `Operation Succeeded.`:
+```
+Sending Vibrate for 200ms at 20% via Cloud...
+Accepted:    True
+Raw body:    Operation Attempted.
+```
+
+The device should fire a brief light vibration. If `Accepted` is
+`False` (i.e. the response body is something other than the two
+above), match the body to the troubleshooting table:
 
 | Body                                | Cause                                                  |
 | ----------------------------------- | ------------------------------------------------------ |
