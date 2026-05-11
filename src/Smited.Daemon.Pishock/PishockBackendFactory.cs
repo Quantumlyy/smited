@@ -96,6 +96,13 @@ public sealed class PishockBackendFactory : IBackendFactory
                         "LAN mode requires DeviceIp. Find the device's IP via your router's DHCP "
                         + "lease list or the PiShock mobile app's device-info screen.");
                 }
+                if (options.DevicePort.HasValue
+                    && (options.DevicePort.Value < 1 || options.DevicePort.Value > 65_535))
+                {
+                    throw new BackendConfigurationException(descriptor.Id, descriptor.Kind,
+                        $"DevicePort={options.DevicePort.Value} is out of range; must be 1..65535. "
+                        + "Omit DevicePort to default to 80.");
+                }
                 break;
         }
     }

@@ -127,6 +127,57 @@ public class PishockBackendFactoryTests
     }
 
     [Fact]
+    public void TryCreate_in_lan_mode_with_zero_port_throws_with_field_named()
+    {
+        var (factory, section, services, logger) = NewFactory(new Dictionary<string, string?>
+        {
+            ["Mode"] = "Lan",
+            ["DeviceIp"] = "192.168.1.50",
+            ["DevicePort"] = "0",
+        });
+        var descriptor = new BackendDescriptor { Kind = "pishock", Id = "right-calf" };
+
+        var act = () => factory.TryCreate(descriptor, section, services, logger);
+
+        act.Should().Throw<BackendConfigurationException>()
+            .WithMessage("*DevicePort*");
+    }
+
+    [Fact]
+    public void TryCreate_in_lan_mode_with_out_of_range_port_throws_with_field_named()
+    {
+        var (factory, section, services, logger) = NewFactory(new Dictionary<string, string?>
+        {
+            ["Mode"] = "Lan",
+            ["DeviceIp"] = "192.168.1.50",
+            ["DevicePort"] = "70000",
+        });
+        var descriptor = new BackendDescriptor { Kind = "pishock", Id = "right-calf" };
+
+        var act = () => factory.TryCreate(descriptor, section, services, logger);
+
+        act.Should().Throw<BackendConfigurationException>()
+            .WithMessage("*DevicePort*");
+    }
+
+    [Fact]
+    public void TryCreate_in_lan_mode_with_negative_port_throws_with_field_named()
+    {
+        var (factory, section, services, logger) = NewFactory(new Dictionary<string, string?>
+        {
+            ["Mode"] = "Lan",
+            ["DeviceIp"] = "192.168.1.50",
+            ["DevicePort"] = "-1",
+        });
+        var descriptor = new BackendDescriptor { Kind = "pishock", Id = "right-calf" };
+
+        var act = () => factory.TryCreate(descriptor, section, services, logger);
+
+        act.Should().Throw<BackendConfigurationException>()
+            .WithMessage("*DevicePort*");
+    }
+
+    [Fact]
     public void TryCreate_in_lan_mode_without_DeviceIp_throws_with_field_named()
     {
         var (factory, section, services, logger) = NewFactory(new Dictionary<string, string?>
