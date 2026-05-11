@@ -230,8 +230,15 @@ PiShock backend multiplies authored intensity by that scale —
 setting both to the same non-100 value silently double-scales (a
 file with `default_intensity: 30` and authored `intensity: 30` fires
 at `30 * 30 / 100 = 9%`, not 30%). The bundled PiShock library uses
-this convention; OWO files differ because the OWO backend doesn't
-apply `IntensityScale`.
+this convention to keep the file's `default_intensity` and the
+authored microsensation `intensity` decoupled: the microsensation
+intensity is what the device fires at when triggered without an
+override, and `default_intensity: 100` documents "no attenuation
+by default; intensity_scale overrides scale from authored." If you
+hand-author files for OWO or another kind, check that backend's
+runtime intensity-scale behavior before reusing this convention —
+backends that also apply `IntensityScale` double-scale the same
+way, and backends that ignore it don't.
 
 `estimated_duration` is the sum of every microsensation's
 `delay_before + duration`. For the example above:

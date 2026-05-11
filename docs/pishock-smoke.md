@@ -100,13 +100,18 @@ Backends    2 registered (pishock × 2)
 Body map    2 placements
 ```
 
-If the daemon refuses to start with a
+If the daemon refuses to start with an
+`InvalidOperationException` whose inner exception is a
 `BackendConfigurationException`, options validation rejected one of
-the descriptor's fields. The exception's message names the field
-and the value (e.g. `DevicePort=0 is out of range; must be 1..65535`).
-The bootstrapper rethrows these untouched so startup aborts rather
-than continuing without the misconfigured backend — fix the option
-and rerun.
+the descriptor's fields. The bootstrapper catches every exception
+from `IBackendFactory.TryCreate` and wraps it in an outer
+`InvalidOperationException` naming the descriptor's `Kind` and
+`Id`; the typed `BackendConfigurationException` is the
+`InnerException` and carries the field-named message (e.g.
+`DevicePort=0 is out of range; must be 1..65535`). Read both
+exception messages when triaging — the outer tells you which
+descriptor; the inner tells you which option. Fix the option and
+rerun.
 
 If the daemon starts but the banner shows zero PiShock backends,
 check the config: a typo in `Kind` (must be `pishock` or
