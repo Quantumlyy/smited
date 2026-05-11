@@ -189,7 +189,7 @@ Single-pulse sensation:
     "microsensations": [
       {
         "parameters": {
-          "op":        { "enum_value": "Vibrate" },
+          "op":        { "enum_value": "vibrate" },
           "duration":  { "duration":   "0.5s" },
           "intensity": { "number":     30 }
         }
@@ -211,9 +211,9 @@ Multi-pulse sensation:
   "estimated_duration": "0.7s",
   "definition": {
     "microsensations": [
-      { "parameters": { "op": {"enum_value": "Vibrate"}, "duration": {"duration": "0.1s"}, "intensity": {"number": 50} } },
-      { "parameters": { "op": {"enum_value": "Vibrate"}, "duration": {"duration": "0.1s"}, "intensity": {"number": 50}, "delay_before": {"duration": "0.2s"} } },
-      { "parameters": { "op": {"enum_value": "Vibrate"}, "duration": {"duration": "0.1s"}, "intensity": {"number": 50}, "delay_before": {"duration": "0.2s"} } }
+      { "parameters": { "op": {"enum_value": "vibrate"}, "duration": {"duration": "0.1s"}, "intensity": {"number": 50} } },
+      { "parameters": { "op": {"enum_value": "vibrate"}, "duration": {"duration": "0.1s"}, "intensity": {"number": 50}, "delay_before": {"duration": "0.2s"} } },
+      { "parameters": { "op": {"enum_value": "vibrate"}, "duration": {"duration": "0.1s"}, "intensity": {"number": 50}, "delay_before": {"duration": "0.2s"} } }
     ]
   }
 }

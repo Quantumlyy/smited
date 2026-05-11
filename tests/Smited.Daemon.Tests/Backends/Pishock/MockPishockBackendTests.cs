@@ -100,7 +100,13 @@ public class MockPishockBackendTests
 
         byName.Should().ContainKey("op").WhoseValue.Type.Should().Be(ParameterType.Enum);
         byName["op"].Required.Should().BeTrue();
-        byName["op"].EnumValues.Should().BeEquivalentTo("Vibrate", "Beep");
+        // Lowercase: ParameterValue.enum_value is protovalidated as a
+        // lowercase ident; Pascal "Vibrate" is rejected on the wire
+        // before reaching schema validation. The backend's runtime
+        // op-name parse is case-insensitive so existing test fixtures
+        // that constructed "Vibrate" still resolve via Enum.TryParse.
+        byName["op"].EnumValues.Should().Contain("vibrate");
+        byName["op"].EnumValues.Should().Contain("beep");
 
         byName.Should().ContainKey("duration").WhoseValue.Type.Should().Be(ParameterType.Duration);
         byName["duration"].Required.Should().BeTrue();

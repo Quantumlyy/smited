@@ -11,7 +11,7 @@
     "microsensations": [
       {
         "parameters": {
-          "op":        { "enum_value": "Vibrate" },
+          "op":        { "enum_value": "vibrate" },
           "duration":  { "duration":   "1.0s" },
           "intensity": { "number":     60 }
         }
