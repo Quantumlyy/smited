@@ -26,7 +26,12 @@ public class MockBhapticsBackendTests
         var backend = NewVest();
 
         backend.Id.Should().Be("mock-bhaptics-vest");
-        backend.Kind.Should().Be("mock_bhaptics_vest");
+        // Advertised Kind matches the REAL backend so sensation files
+        // declaring backend_kind=bhaptics_vest bind to either this mock
+        // or the real BhapticsVestBackend. (The descriptor discriminator
+        // mock_bhaptics_vest is the factory's IBackendFactory.Kind, not
+        // this property.)
+        backend.Kind.Should().Be("bhaptics_vest");
         backend.DeviceKey.Should().Be("vest");
         backend.MotorCount.Should().Be(40);
         backend.Status.Should().Be(BackendStatus.Ready);
@@ -149,8 +154,8 @@ public class MockBhapticsBackendTests
     }
 
     [Theory]
-    [InlineData("left", "mock_bhaptics_sleeve_l", "sleeve_l", 6)]
-    [InlineData("right", "mock_bhaptics_sleeve_r", "sleeve_r", 6)]
+    [InlineData("left", "bhaptics_sleeve_l", "sleeve_l", 6)]
+    [InlineData("right", "bhaptics_sleeve_r", "sleeve_r", 6)]
     public void Sleeve_descriptors_match_per_side(string side, string kind, string deviceKey, int motors)
     {
         var backend = NewSleeve(side);
@@ -160,8 +165,8 @@ public class MockBhapticsBackendTests
     }
 
     [Theory]
-    [InlineData("left", "mock_bhaptics_feet_l", "feet_l", 3)]
-    [InlineData("right", "mock_bhaptics_feet_r", "feet_r", 3)]
+    [InlineData("left", "bhaptics_feet_l", "feet_l", 3)]
+    [InlineData("right", "bhaptics_feet_r", "feet_r", 3)]
     public void Feet_descriptors_match_per_side(string side, string kind, string deviceKey, int motors)
     {
         var backend = NewFeet(side);

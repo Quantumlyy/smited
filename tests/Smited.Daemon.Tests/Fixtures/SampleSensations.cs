@@ -74,7 +74,7 @@ internal static class SampleSensations
     public const string BhapticsVestPectoralPulse = """
         {
           "name": "bhaptics_pectoral_pulse",
-          "backend_kind": "mock_bhaptics_vest",
+          "backend_kind": "bhaptics_vest",
           "display_name": "bHaptics Pectoral Pulse",
           "description": "Single pulse across the left pectoral.",
           "tags": ["test"],
@@ -96,7 +96,7 @@ internal static class SampleSensations
 
     public static void WriteBhapticsVest(string libraryRoot, string fileName, string contents)
     {
-        var dir = Path.Combine(libraryRoot, "mock_bhaptics_vest");
+        var dir = Path.Combine(libraryRoot, "bhaptics_vest");
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, fileName), contents);
     }

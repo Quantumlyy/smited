@@ -1,0 +1,22 @@
+{
+  "name": "compile_error_mild",
+  "backend_kind": "bhaptics_vest",
+  "display_name": "Compile Error (Mild)",
+  "description": "Firm bump on the left pectoral — one warning, look when you can.",
+  "tags": ["build", "error", "mild"],
+  "default_zone_ids": ["pectoral_l"],
+  "default_intensity": 55,
+  "estimated_duration": "0.5s",
+  "definition": {
+    "microsensations": [
+      {
+        "parameters": {
+          "intensity": { "number": 55 },
+          "duration": { "duration": "0.4s" },
+          "ramp_up": { "duration": "0.05s" },
+          "ramp_down": { "duration": "0.05s" }
+        }
+      }
+    ]
+  }
+}

@@ -30,7 +30,9 @@ public sealed class MockBhapticsFeetBackend : MockBhapticsBackendBase
         _isLeft = ResolveIsLeft(side);
     }
 
-    public override string Kind => _isLeft ? "mock_bhaptics_feet_l" : "mock_bhaptics_feet_r";
+    // Advertises the REAL kind so sensations are portable real↔mock;
+    // see MockBhapticsVestBackend.Kind comment.
+    public override string Kind => _isLeft ? "bhaptics_feet_l" : "bhaptics_feet_r";
     public override string DeviceKey => _isLeft ? "feet_l" : "feet_r";
     public override int MotorCount => 3;
 

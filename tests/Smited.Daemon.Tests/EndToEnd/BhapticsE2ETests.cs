@@ -127,7 +127,9 @@ public class BhapticsE2ETests : IDisposable
         var response = await _fixture.Client.DescribeBackendAsync(
             new DescribeBackendRequest { BackendId = "mock-sleeve-l" });
 
-        response.Summary.Kind.Should().Be("mock_bhaptics_sleeve_l");
+        // Mock advertises the REAL hardware family kind so sensation
+        // files are portable real↔mock.
+        response.Summary.Kind.Should().Be("bhaptics_sleeve_l");
         response.Zones.Zones.Select(z => z.Id).Should().Contain("arm_l");
         response.Parameters.Parameters.Select(p => p.Name).Should().NotContain("frequency",
             "bHaptics is vibrotactile, no frequency parameter");

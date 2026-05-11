@@ -28,7 +28,13 @@ public sealed class MockBhapticsVestBackend : MockBhapticsBackendBase
     {
     }
 
-    public override string Kind => "mock_bhaptics_vest";
+    // Advertises the REAL kind (bhaptics_vest) so a sensation file
+    // declaring backend_kind=bhaptics_vest binds to either this mock
+    // OR the real BhapticsVestBackend on Windows. Matches the
+    // MockOwoBackend pattern: descriptor kind is "mock_bhaptics_vest"
+    // (used by the factory to dispatch) but the advertised IHapticBackend.Kind
+    // is the cross-backend hardware family.
+    public override string Kind => "bhaptics_vest";
     public override string DeviceKey => "vest";
     public override int MotorCount => 40;
 

@@ -32,7 +32,9 @@ public sealed class MockBhapticsSleeveBackend : MockBhapticsBackendBase
         _isLeft = ResolveIsLeft(side);
     }
 
-    public override string Kind => _isLeft ? "mock_bhaptics_sleeve_l" : "mock_bhaptics_sleeve_r";
+    // Advertises the REAL kind so sensations are portable real↔mock;
+    // see MockBhapticsVestBackend.Kind comment.
+    public override string Kind => _isLeft ? "bhaptics_sleeve_l" : "bhaptics_sleeve_r";
     public override string DeviceKey => _isLeft ? "sleeve_l" : "sleeve_r";
     public override int MotorCount => 6;
 
