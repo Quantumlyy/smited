@@ -141,6 +141,83 @@ even when gRPC is bound to the LAN.
   match on the prefix without depending on a wire-schema bump
   (the schema is pinned at `buf.build/quantumly-labs/smited:v0.1.0`).
 
+## Body Map
+
+The `/bodymap` page (linked from the header on every admin page)
+visualizes every registered backend's zones on a human silhouette
+(front and back) and pulses them in real time as sensations fire.
+Recently-fired zones fade over 3 seconds as a diagnostic heatmap.
+
+### Features
+
+- **Live pulse.** Subscribes to the in-process `EventBus`; every
+  `SensationStarted` lights up its target zones with an animated
+  outer ring. `SensationCompleted` / `SensationCancelled` ends the
+  pulse — the recent-fire heatmap then decays over 3 seconds.
+- **Hover for metadata.** A pinned tooltip shows the backend display
+  name and kind, zone id, body coordinates (`X`, `Y`, `Z` in the
+  `body` frame), and a FORBIDDEN flag if the bodymap descriptor
+  places the zone in a region the backend's manufacturer guidance
+  bans.
+- **Click to fire diagnostic.** A single-zone, ~0.3 s,
+  backend-tailored pulse routes through `SmitedActionService`, so
+  the breaker check, history row, and event publication happen
+  identically to a gRPC trigger. Each backend supplies the
+  microsensation parameters from its own `ParameterSchema` —
+  OWO uses `frequency`, bHaptics doesn't, PiShock uses **vibrate**
+  (never shock). Forbidden zones don't fire from this UI and show a
+  dashed red outline.
+- **Backend filter.** The dropdown narrows the view to a single
+  backend or shows every backend overlaid (each kind has its own
+  color).
+- **Breaker integration.** When the daemon-wide breaker is latched,
+  the page shows a banner explaining that clicks won't fire. Clicks
+  still round-trip and surface a transient toast with the
+  `BREAKER_TRIPPED:` rejection so external observers can confirm
+  the reject path is intact.
+
+### Color legend by backend kind
+
+- Blue — OWO Skin
+- Green — bHaptics TactSuit (vest)
+- Amber — bHaptics TactSleeve (left and right)
+- Purple — bHaptics Tactosy for Feet (left and right)
+- Red — PiShock
+- Pink — mock backends and any kind not in the known list above
+
+### Workflow: verifying a new backend's motor map
+
+1. Enable the backend in `appsettings.json` and restart the daemon.
+2. Open `/bodymap`.
+3. Click each zone in turn; confirm the physical sensation lands at
+   the dot's position.
+4. If a sensation fires somewhere else — wrong motor, wrong limb
+   side, wrong region — the backend's motor map is wrong. Edit it
+   in source (for example, `BhapticsMotorMap.VestMotorsForZone`)
+   and rebuild.
+5. Repeat until every zone fires where the dot says it should.
+
+This is the primary diagnostic surface for catching motor-map
+regressions — the page exists for exactly this round-trip and is
+intentionally read-only on the sensation library (zone definitions
+live in backend source, not in editable JSON).
+
+### Coordinate convention
+
+Body coordinates from `PositionHint` are normalized to `[0, 1]`:
+
+| Axis | 0 | 1 |
+| ---- | --- | --- |
+| X | anatomical left  | anatomical right |
+| Y | feet             | top of head |
+| Z | front of body    | back of body |
+
+The renderer flips X on the front pane so that anatomical-left
+zones appear on the viewer's right (face-on convention) and leaves
+X untouched on the back pane (viewing-from-behind convention).
+Zones at exactly `Z = 0.5` (arms and other side-of-body zones)
+render on the front pane.
+
 ## Troubleshooting
 
 - **Blank page** — hard refresh (Cmd-Shift-R / Ctrl-Shift-R). Blazor's
